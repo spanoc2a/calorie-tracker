@@ -145,6 +145,17 @@ function RecipeCard({ r, onAdd, onDelete, onUpdateItems }) {
     setQtys(prev => ({ ...prev, [id]: val }));
   }
 
+  function commitQty(i) {
+    const newQty = qtys[i.id];
+    if (newQty == null || newQty <= 0 || newQty === i.quantity) return;
+    const ratio = newQty / i.quantity;
+    const updatedItems = r.items.map(x =>
+      x.id === i.id ? { ...scale(x, ratio), id: x.id, quantity: newQty, unit: x.unit } : x
+    );
+    setQtys(prev => { const s = { ...prev }; delete s[i.id]; return s; });
+    onUpdateItems(updatedItems);
+  }
+
   const scaledItems = r.items.map(i => ({ ...scale(i, getRatio(i)), id: i.id, quantity: qtys[i.id] ?? i.quantity, unit: i.unit }));
   const totalKcal   = scaledItems.reduce((a, i) => a + i.kcal, 0);
   const hasChanges  = r.items.some(i => getRatio(i) !== 1);
@@ -175,6 +186,7 @@ function RecipeCard({ r, onAdd, onDelete, onUpdateItems }) {
                     step="any"
                     value={qtys[i.id] ?? i.quantity}
                     onChange={e => setQty(i.id, +e.target.value)}
+                    onBlur={() => commitQty(i)}
                     onClick={e => e.stopPropagation()}
                   />
                   <span className="ing-unit">{i.unit}</span>
