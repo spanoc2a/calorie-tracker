@@ -74,10 +74,14 @@ const STYLE = `
   .recipe-toggle { font-size: 0.65rem; color: #4a4a3a; }
   .recipe-card .recipe-info { font-size: 0.65rem; color: #5a5a4a; margin-bottom: 10px; }
   .ingredient-list { border-top: 1px solid #222; padding-top: 10px; margin-bottom: 10px; }
-  .ingredient-row { display: flex; align-items: center; gap: 8px; padding: 5px 0; border-bottom: 1px solid #161616; }
+  .ingredient-row { display: flex; align-items: center; gap: 8px; padding: 6px 0; border-bottom: 1px solid #161616; }
   .ingredient-row:last-child { border-bottom: none; }
   .ing-name { flex: 1; font-size: 0.72rem; color: #d0c8b8; }
   .ing-kcal { font-size: 0.65rem; color: #5a5a4a; min-width: 58px; text-align: right; }
+  .ing-qty-wrap { display: flex; align-items: center; gap: 4px; }
+  .ing-qty-input { background: #0d0d0d; border: 1px solid #3a3a2a; border-radius: 5px; color: #c8b890; font-family: 'DM Mono', monospace; font-size: 0.72rem; width: 52px; padding: 3px 6px; text-align: center; outline: none; }
+  .ing-qty-input:focus { border-color: #c8b890; }
+  .ing-unit { font-size: 0.65rem; color: #5a5a4a; min-width: 24px; }
   .recipe-actions { display: flex; gap: 8px; align-items: center; }
   .portion-ctrl { display: flex; align-items: center; gap: 5px; }
   .portion-ctrl button { background: #2a2a2a; border: 1px solid #3a3a2a; color: #c8b890; border-radius: 5px; width: 22px; height: 22px; font-size: 0.9rem; cursor: pointer; display: flex; align-items: center; justify-content: center; }
@@ -126,17 +130,24 @@ function scale(item, mult) {
 }
 
 function RecipeCard({ r, onAdd, onDelete }) {
-  const [expanded, setExpanded]   = useState(false);
-  const [mults,    setMults]      = useState({});
+  const [expanded, setExpanded] = useState(false);
+  const [qtys,     setQtys]     = useState({});
 
-  function getMult(id) { return mults[id] ?? 1; }
-  function changeMult(id, delta) {
-    setMults(prev => ({ ...prev, [id]: Math.max(0.5, +((getMult(id) + delta).toFixed(1))) }));
+  function getRatio(i) {
+    if (i.quantity && i.quantity > 0) {
+      const current = qtys[i.id] ?? i.quantity;
+      return current / i.quantity;
+    }
+    return qtys[i.id] ?? 1;
   }
 
-  const scaledItems = r.items.map(i => ({ ...scale(i, getMult(i.id)), id: i.id }));
+  function setQty(id, val) {
+    setQtys(prev => ({ ...prev, [id]: val }));
+  }
+
+  const scaledItems = r.items.map(i => ({ ...scale(i, getRatio(i)), id: i.id, quantity: qtys[i.id] ?? i.quantity, unit: i.unit }));
   const totalKcal   = scaledItems.reduce((a, i) => a + i.kcal, 0);
-  const hasChanges  = r.items.some(i => getMult(i.id) !== 1);
+  const hasChanges  = r.items.some(i => getRatio(i) !== 1);
 
   return (
     <div className="recipe-card">
@@ -154,12 +165,27 @@ function RecipeCard({ r, onAdd, onDelete }) {
           {r.items.map(i => (
             <div className="ingredient-row" key={i.id}>
               <span className="ing-name">{i.name}</span>
-              <span className="ing-kcal">{Math.round(i.kcal * getMult(i.id))} kcal</span>
-              <div className="portion-ctrl">
-                <button onClick={e => { e.stopPropagation(); changeMult(i.id, -0.5); }}>−</button>
-                <span className="portion-val">{getMult(i.id)}×</span>
-                <button onClick={e => { e.stopPropagation(); changeMult(i.id, +0.5); }}>+</button>
-              </div>
+              <span className="ing-kcal">{Math.round(i.kcal * getRatio(i))} kcal</span>
+              {i.quantity != null ? (
+                <div className="ing-qty-wrap">
+                  <input
+                    className="ing-qty-input"
+                    type="number"
+                    min="0"
+                    step="any"
+                    value={qtys[i.id] ?? i.quantity}
+                    onChange={e => setQty(i.id, +e.target.value)}
+                    onClick={e => e.stopPropagation()}
+                  />
+                  <span className="ing-unit">{i.unit}</span>
+                </div>
+              ) : (
+                <div className="portion-ctrl">
+                  <button onClick={e => { e.stopPropagation(); setQty(i.id, Math.max(0.5, +((getRatio(i) - 0.5).toFixed(1)))); }}>−</button>
+                  <span className="portion-val">{getRatio(i)}×</span>
+                  <button onClick={e => { e.stopPropagation(); setQty(i.id, +((getRatio(i) + 0.5).toFixed(1))); }}>+</button>
+                </div>
+              )}
             </div>
           ))}
         </div>
