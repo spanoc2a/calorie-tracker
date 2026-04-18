@@ -1,4 +1,4 @@
-import { kv } from '@vercel/kv';
+import { db as kv } from '../db';
 
 export async function POST(req) {
   const { text, date } = await req.json();
@@ -26,8 +26,19 @@ Format exact:
   });
   
   const data = await res.json();
+
+  if (!res.ok) {
+    const msg = data.error?.message || `Erreur API ${res.status}`;
+    return Response.json({ error: msg }, { status: res.status });
+  }
+
   const content = data.content?.find(b => b.type === "text")?.text || "";
-  const parsed = JSON.parse(content.replace(/```json|```/g, "").trim());
+  let parsed;
+  try {
+    parsed = JSON.parse(content.replace(/```json|```/g, "").trim());
+  } catch {
+    return Response.json({ error: "Réponse invalide du modèle", raw: content }, { status: 500 });
+  }
   const items = parsed.items.map(i => ({ ...i, id: Date.now() + Math.random() }));
   
   const key = `day:${date}`;

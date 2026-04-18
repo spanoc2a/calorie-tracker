@@ -160,6 +160,7 @@ export default function App() {
         body: JSON.stringify({ text: input, date: key }),
       });
       const data = await res.json();
+      if (data.error) { setError(data.error); setLoading(false); return; }
       setEntries(prev => [...prev, ...data.items]);
       setPendingItems(data.items);
       setInput("");
