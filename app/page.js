@@ -427,7 +427,7 @@ export default function App() {
                     <input type="checkbox" className="entry-check" checked={selectedIds.has(e.id)} onChange={() => toggleSelect(e.id)} />
                     <div className="entry-icon">{getIcon(e.name)}</div>
                     <div className="entry-info">
-                      <div className="entry-name">{e.name}</div>
+                      <div className="entry-name">{e.name}{e.quantity != null ? <span style={{ color: "#5a5a4a", fontSize: "0.7rem" }}> · {e.quantity}{e.unit}</span> : null}</div>
                       <div className="entry-macros">P {e.protein}g · G {e.carbs}g · L {e.fat}g</div>
                     </div>
                     <div className="entry-kcal">{e.kcal}<span>kcal</span></div>
