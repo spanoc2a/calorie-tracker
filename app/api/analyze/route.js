@@ -1,6 +1,4 @@
-import Redis from 'ioredis';
-
-const redis = new Redis(process.env.storage_REDIS_URL);
+import { kv } from '@vercel/kv';
 
 export async function POST(req) {
   const { text, date } = await req.json();
@@ -33,8 +31,8 @@ Format exact:
   const items = parsed.items.map(i => ({ ...i, id: Date.now() + Math.random() }));
   
   const key = `day:${date}`;
-  const existing = JSON.parse(await redis.get(key) || "[]");
-  await redis.set(key, JSON.stringify([...existing, ...items]));
+  const existing = await kv.get(key) || [];
+  await kv.set(key, [...existing, ...items]);
   
   return Response.json({ items });
 }
