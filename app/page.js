@@ -95,10 +95,21 @@ const STYLE = `
   .macro-section { margin-bottom: 8px; }
   .macro-section-header { font-size: 0.75rem; font-family: 'Playfair Display', serif; color: #f0e6c8; margin: 20px 0 4px; padding-bottom: 6px; border-bottom: 1px solid #2a2a2a; }
   .food-cat-header { font-size: 0.58rem; color: #4a4a3a; letter-spacing: 2px; text-transform: uppercase; margin: 10px 0 6px; padding-left: 2px; }
-  .ing-card { background: #1a1a1a; border: 1px solid #1e1e1e; border-radius: 10px; padding: 10px 12px; margin-bottom: 6px; display: flex; align-items: center; gap: 10px; }
+  .ing-card { background: #1a1a1a; border: 1px solid #1e1e1e; border-radius: 10px; padding: 10px 12px; margin-bottom: 6px; display: flex; align-items: center; gap: 10px; transition: border-color 0.2s; }
+  .ing-card.selected { border-color: #c8b890; }
   .ing-card-name { flex: 1; font-size: 0.78rem; color: #d0c8b8; }
+  .ing-card-ref { font-size: 0.58rem; color: #3a3a2a; margin-top: 2px; letter-spacing: 1px; }
   .ing-card-macros { font-size: 0.6rem; color: #5a5a4a; text-align: right; line-height: 1.6; }
   .ing-card-kcal { font-family: 'Playfair Display', serif; font-size: 1rem; color: #c8b890; flex-shrink: 0; min-width: 44px; text-align: right; }
+  .ing-qty-row { display: flex; align-items: center; gap: 6px; margin-top: 8px; padding-top: 8px; border-top: 1px solid #222; }
+  .ing-qty-row label { font-size: 0.6rem; color: #5a5a4a; letter-spacing: 1px; flex-shrink: 0; }
+  .builder-preview { background: #1e1a12; border: 1px solid #3a3520; border-radius: 12px; padding: 14px; margin-top: 16px; }
+  .builder-preview h3 { font-family: 'Playfair Display', serif; font-size: 1rem; color: #f0e6c8; margin-bottom: 10px; }
+  .builder-totals { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; margin-bottom: 12px; }
+  .builder-total-cell { text-align: center; }
+  .builder-total-val { font-family: 'Playfair Display', serif; font-size: 1.1rem; color: #c8b890; }
+  .builder-total-label { font-size: 0.55rem; color: #5a5a4a; letter-spacing: 1px; text-transform: uppercase; margin-top: 2px; }
+  .builder-items { font-size: 0.65rem; color: #4a4a3a; margin-bottom: 12px; line-height: 1.8; }
   .cat-select { width: 100%; background: #0d0d0d; border: 1px solid #2a2a2a; border-radius: 8px; padding: 10px 12px; color: #e8e0d0; font-family: 'DM Mono', monospace; font-size: 0.8rem; outline: none; margin-bottom: 12px; appearance: none; }
   .cat-select:focus { border-color: #c8b890; }
   .week-chart { background: #1a1a1a; border: 1px solid #2a2a2a; border-radius: 14px; padding: 16px; margin-bottom: 20px; }
@@ -147,10 +158,46 @@ const MACRO_SECTIONS = [
 ];
 const FOOD_CATEGORY_ORDER = ["fruit","légume","viande","poisson","céréale","produit laitier","légumineuse","matière grasse","noix et graines","boisson","autre"];
 
-function IngredientLibrary({ ingredients, onDelete }) {
+function getMacros(ing, qty) {
+  if (ing.per100) {
+    const f = qty / 100;
+    return { kcal: Math.round(ing.per100.kcal * f), protein: Math.round(ing.per100.protein * f * 10) / 10, carbs: Math.round(ing.per100.carbs * f * 10) / 10, fat: Math.round(ing.per100.fat * f * 10) / 10 };
+  }
+  const f = qty;
+  const p = ing.perUnit || { kcal: 0, protein: 0, carbs: 0, fat: 0 };
+  return { kcal: Math.round(p.kcal * f), protein: Math.round(p.protein * f * 10) / 10, carbs: Math.round(p.carbs * f * 10) / 10, fat: Math.round(p.fat * f * 10) / 10 };
+}
+
+function IngredientLibrary({ ingredients, onDelete, onCreateRecipe }) {
+  const [selected, setSelected] = useState({});   // { [id]: qty }
+  const [qtys,     setQtys]     = useState({});   // editing state
+
+  function toggleSelect(ing) {
+    setSelected(prev => {
+      if (prev[ing.id] != null) { const s = { ...prev }; delete s[ing.id]; return s; }
+      return { ...prev, [ing.id]: ing.per100 ? 100 : 1 };
+    });
+  }
+
+  const selectedList = ingredients.filter(i => selected[i.id] != null);
+  const totals = selectedList.reduce((acc, i) => {
+    const qty = qtys[i.id] ?? selected[i.id];
+    const m = getMacros(i, qty);
+    return { kcal: acc.kcal + m.kcal, protein: acc.protein + m.protein, carbs: acc.carbs + m.carbs, fat: acc.fat + m.fat };
+  }, { kcal: 0, protein: 0, carbs: 0, fat: 0 });
+
+  function buildItems() {
+    return selectedList.map(i => {
+      const qty = qtys[i.id] ?? selected[i.id];
+      const m = getMacros(i, qty);
+      return { id: Date.now() + Math.random(), name: i.name, quantity: qty, unit: i.baseUnit, ...m };
+    });
+  }
+
   if (ingredients.length === 0) {
     return <div className="empty-state">— aucun ingrédient enregistré —<br/><br/>Ils apparaissent automatiquement lors de l'analyse</div>;
   }
+
   return (
     <div>
       <div className="section-label">Bibliothèque — {ingredients.length} ingrédient{ingredients.length > 1 ? "s" : ""}</div>
@@ -170,22 +217,60 @@ function IngredientLibrary({ ingredients, onDelete }) {
             {sortedCats.map(cat => (
               <div key={cat}>
                 <div className="food-cat-header">{cat}</div>
-                {byCategory[cat].map(i => (
-                  <div className="ing-card" key={i.id}>
-                    <div className="ing-card-name">{i.name}</div>
-                    <div className="ing-card-macros">
-                      P {i.protein}g · G {i.carbs}g · L {i.fat}g
-                      {i.quantity != null && <><br/><span style={{ color: "#3a3a2a" }}>{i.quantity}{i.unit}</span></>}
+                {byCategory[cat].map(i => {
+                  const isSelected = selected[i.id] != null;
+                  const ref = i.per100 ? i.per100 : i.perUnit;
+                  const refLabel = i.per100 ? `/ 100${i.baseUnit}` : `/ ${i.baseUnit}`;
+                  return (
+                    <div className={`ing-card ${isSelected ? "selected" : ""}`} key={i.id} style={{ flexWrap: "wrap" }}>
+                      <input type="checkbox" className="entry-check" checked={isSelected} onChange={() => toggleSelect(i)} />
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <div className="ing-card-name">{i.name}</div>
+                        <div className="ing-card-ref">{ref?.kcal} kcal · P {ref?.protein}g · G {ref?.carbs}g · L {ref?.fat}g {refLabel}</div>
+                        {isSelected && (
+                          <div className="ing-qty-row">
+                            <label>Quantité</label>
+                            <input
+                              className="ing-qty-input"
+                              type="number" min="0" step="any"
+                              value={qtys[i.id] ?? selected[i.id]}
+                              onChange={e => setQtys(prev => ({ ...prev, [i.id]: +e.target.value }))}
+                              style={{ width: 60 }}
+                            />
+                            <span className="ing-unit">{i.baseUnit}</span>
+                            {(() => { const qty = qtys[i.id] ?? selected[i.id]; const m = getMacros(i, qty); return <span style={{ fontSize: "0.6rem", color: "#6b6b5a", marginLeft: 4 }}>= {m.kcal} kcal</span>; })()}
+                          </div>
+                        )}
+                      </div>
+                      <button className="del-btn" onClick={() => onDelete(i.id)}>✕</button>
                     </div>
-                    <div className="ing-card-kcal">{i.kcal}<span style={{ display: "block", fontSize: "0.5rem", color: "#4a4a3a", letterSpacing: "1px" }}>kcal</span></div>
-                    <button className="del-btn" onClick={() => onDelete(i.id)}>✕</button>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             ))}
           </div>
         );
       })}
+
+      {selectedList.length > 0 && (
+        <div className="builder-preview">
+          <h3>Aperçu — {selectedList.length} ingrédient{selectedList.length > 1 ? "s" : ""}</h3>
+          <div className="builder-totals">
+            {[{ label: "kcal", val: totals.kcal }, { label: "protéines", val: `${Math.round(totals.protein)}g` }, { label: "glucides", val: `${Math.round(totals.carbs)}g` }, { label: "lipides", val: `${Math.round(totals.fat)}g` }].map(c => (
+              <div className="builder-total-cell" key={c.label}>
+                <div className="builder-total-val">{c.val}</div>
+                <div className="builder-total-label">{c.label}</div>
+              </div>
+            ))}
+          </div>
+          <div className="builder-items">
+            {selectedList.map(i => { const qty = qtys[i.id] ?? selected[i.id]; return <span key={i.id}>{i.name} {qty}{i.baseUnit} &nbsp;</span>; })}
+          </div>
+          <button className="btn" style={{ width: "100%" }} onClick={() => onCreateRecipe(buildItems())}>
+            💾 Créer une recette
+          </button>
+        </div>
+      )}
     </div>
   );
 }
@@ -544,10 +629,14 @@ export default function App() {
             )}
 
             {recetteTab === "ingredients" && (
-              <IngredientLibrary ingredients={ingredients} onDelete={id => {
-                fetch('/api/ingredients', { method: 'DELETE', headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id }) });
-                setIngredients(prev => prev.filter(i => i.id !== id));
-              }} />
+              <IngredientLibrary
+                ingredients={ingredients}
+                onDelete={id => {
+                  fetch('/api/ingredients', { method: 'DELETE', headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id }) });
+                  setIngredients(prev => prev.filter(i => i.id !== id));
+                }}
+                onCreateRecipe={items => { setPendingItems(items); setSaveModal(true); }}
+              />
             )}
           </>
         )}

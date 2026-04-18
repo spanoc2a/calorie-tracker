@@ -48,17 +48,32 @@ Format exact:
   const existing = await kv.get(key) || [];
   await kv.set(key, [...existing, ...items]);
 
-  // Save to ingredient library (deduplicated by normalized name)
+  // Save to ingredient library normalized to 100g (deduplicated by name)
   const library = await kv.get('ingredientLibrary') || [];
-  let updated = false;
   for (const item of items) {
     const normalizedName = item.name.toLowerCase().trim();
     const idx = library.findIndex(l => l.name.toLowerCase().trim() === normalizedName);
-    const entry = { id: idx >= 0 ? library[idx].id : Date.now() + Math.random(), name: item.name, kcal: item.kcal, protein: item.protein, carbs: item.carbs, fat: item.fat, quantity: item.quantity, unit: item.unit, macroType: item.macroType || 'autre', foodCategory: item.foodCategory || 'autre' };
+    const isGram = item.unit === 'g' || item.unit === 'ml';
+    const entry = {
+      id: idx >= 0 ? library[idx].id : Date.now() + Math.random(),
+      name: item.name,
+      macroType: item.macroType || 'autre',
+      foodCategory: item.foodCategory || 'autre',
+      baseUnit: isGram ? item.unit : (item.unit || 'unité'),
+      ...(isGram && item.quantity > 0 ? {
+        per100: {
+          kcal:    Math.round(item.kcal    * 100 / item.quantity),
+          protein: Math.round(item.protein * 100 / item.quantity * 10) / 10,
+          carbs:   Math.round(item.carbs   * 100 / item.quantity * 10) / 10,
+          fat:     Math.round(item.fat     * 100 / item.quantity * 10) / 10,
+        }
+      } : {
+        perUnit: { kcal: item.kcal, protein: item.protein, carbs: item.carbs, fat: item.fat }
+      })
+    };
     if (idx >= 0) { library[idx] = entry; } else { library.push(entry); }
-    updated = true;
   }
-  if (updated) await kv.set('ingredientLibrary', library);
+  await kv.set('ingredientLibrary', library);
 
   return Response.json({ items });
 }
