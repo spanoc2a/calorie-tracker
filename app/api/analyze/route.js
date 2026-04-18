@@ -1,5 +1,8 @@
+import { kv } from '@vercel/kv';
+
 export async function POST(req) {
-  const { text } = await req.json();
+  const { text, date } = await req.json();
+  
   const res = await fetch("https://api.anthropic.com/v1/messages", {
     method: "POST",
     headers: {
@@ -21,6 +24,16 @@ Format exact:
       messages: [{ role: "user", content: text }],
     }),
   });
+  
   const data = await res.json();
-  return Response.json(data);
+  const content = data.content?.find(b => b.type === "text")?.text || "";
+  const parsed = JSON.parse(content.replace(/```json|```/g, "").trim());
+  const items = parsed.items.map(i => ({ ...i, id: Date.now() + Math.random() }));
+  
+  // Sauvegarde dans KV
+  const key = `day:${date}`;
+  const existing = await kv.get(key) || [];
+  await kv.set(key, [...existing, ...items]);
+  
+  return Response.json({ items });
 }
