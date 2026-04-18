@@ -179,19 +179,22 @@ export default function App() {
   }
 
   async function saveRecipe() {
-    if (!recipeName.trim()) return;
-    const res = await fetch('/api/recipes', {
-      method: 'POST',
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ name: recipeName, items: pendingItems }),
-    });
-    const data = await res.json();
-    setRecipes(prev => [...prev, data.recipe]);
-    setSaveModal(false);
-    setRecipeName("");
-    setPendingItems([]);
+    if (!recipeName.trim() || pendingItems.length === 0) return;
+    try {
+      const res = await fetch('/api/recipes', {
+        method: 'POST',
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name: recipeName, items: pendingItems }),
+      });
+      const data = await res.json();
+      setRecipes(prev => [...prev, data.recipe]);
+      setSaveModal(false);
+      setRecipeName("");
+      setPendingItems([]);
+    } catch(e) {
+      alert("Erreur lors de la sauvegarde : " + e.message);
+    }
   }
-
   async function addRecipeToDay(recipe) {
     const res = await fetch("/api/analyze", {
       method: "POST",
