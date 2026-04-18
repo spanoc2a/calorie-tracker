@@ -234,6 +234,7 @@ function IngredientLibrary({ ingredients, onDelete, onCreateRecipe }) {
                               className="ing-qty-input"
                               type="number" min="0" step="any"
                               value={qtys[i.id] ?? selected[i.id]}
+                              onFocus={e => e.target.select()}
                               onChange={e => setQtys(prev => ({ ...prev, [i.id]: +e.target.value }))}
                               style={{ width: 60 }}
                             />
@@ -331,6 +332,7 @@ function RecipeCard({ r, onAdd, onDelete, onUpdateItems }) {
                     min="0"
                     step="any"
                     value={qtys[i.id] ?? i.quantity}
+                    onFocus={e => e.target.select()}
                     onChange={e => setQty(i.id, +e.target.value)}
                     onBlur={() => commitQty(i)}
                     onClick={e => e.stopPropagation()}
