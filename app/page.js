@@ -89,6 +89,16 @@ const STYLE = `
   .portion-val { font-size: 0.68rem; color: #c8b890; min-width: 26px; text-align: center; }
   .category-group { margin-bottom: 4px; }
   .category-header { font-size: 0.6rem; color: #4a4a3a; letter-spacing: 3px; text-transform: uppercase; margin: 16px 0 8px; padding-left: 2px; border-bottom: 1px solid #1e1e1e; padding-bottom: 6px; }
+  .subtabs { display: flex; gap: 6px; margin-bottom: 20px; }
+  .subtab { flex: 1; padding: 8px; background: #141414; border: 1px solid #222; border-radius: 8px; font-family: 'DM Mono', monospace; font-size: 0.6rem; letter-spacing: 2px; text-transform: uppercase; color: #5a5a4a; cursor: pointer; }
+  .subtab.active { background: #1e1e1e; color: #c8b890; border-color: #3a3a2a; }
+  .macro-section { margin-bottom: 8px; }
+  .macro-section-header { font-size: 0.75rem; font-family: 'Playfair Display', serif; color: #f0e6c8; margin: 20px 0 4px; padding-bottom: 6px; border-bottom: 1px solid #2a2a2a; }
+  .food-cat-header { font-size: 0.58rem; color: #4a4a3a; letter-spacing: 2px; text-transform: uppercase; margin: 10px 0 6px; padding-left: 2px; }
+  .ing-card { background: #1a1a1a; border: 1px solid #1e1e1e; border-radius: 10px; padding: 10px 12px; margin-bottom: 6px; display: flex; align-items: center; gap: 10px; }
+  .ing-card-name { flex: 1; font-size: 0.78rem; color: #d0c8b8; }
+  .ing-card-macros { font-size: 0.6rem; color: #5a5a4a; text-align: right; line-height: 1.6; }
+  .ing-card-kcal { font-family: 'Playfair Display', serif; font-size: 1rem; color: #c8b890; flex-shrink: 0; min-width: 44px; text-align: right; }
   .cat-select { width: 100%; background: #0d0d0d; border: 1px solid #2a2a2a; border-radius: 8px; padding: 10px 12px; color: #e8e0d0; font-family: 'DM Mono', monospace; font-size: 0.8rem; outline: none; margin-bottom: 12px; appearance: none; }
   .cat-select:focus { border-color: #c8b890; }
   .week-chart { background: #1a1a1a; border: 1px solid #2a2a2a; border-radius: 14px; padding: 16px; margin-bottom: 20px; }
@@ -127,6 +137,57 @@ function scale(item, mult) {
     carbs:   Math.round(item.carbs   * mult * 10) / 10,
     fat:     Math.round(item.fat     * mult * 10) / 10,
   };
+}
+
+const MACRO_SECTIONS = [
+  { id: "proteine", label: "Protéines" },
+  { id: "glucide",  label: "Glucides" },
+  { id: "lipide",   label: "Lipides" },
+  { id: "autre",    label: "Autre" },
+];
+const FOOD_CATEGORY_ORDER = ["fruit","légume","viande","poisson","céréale","produit laitier","légumineuse","matière grasse","noix et graines","boisson","autre"];
+
+function IngredientLibrary({ ingredients, onDelete }) {
+  if (ingredients.length === 0) {
+    return <div className="empty-state">— aucun ingrédient enregistré —<br/><br/>Ils apparaissent automatiquement lors de l'analyse</div>;
+  }
+  return (
+    <div>
+      <div className="section-label">Bibliothèque — {ingredients.length} ingrédient{ingredients.length > 1 ? "s" : ""}</div>
+      {MACRO_SECTIONS.map(section => {
+        const sectionItems = ingredients.filter(i => (i.macroType || "autre") === section.id);
+        if (sectionItems.length === 0) return null;
+        const byCategory = {};
+        for (const item of sectionItems) {
+          const cat = item.foodCategory || "autre";
+          if (!byCategory[cat]) byCategory[cat] = [];
+          byCategory[cat].push(item);
+        }
+        const sortedCats = FOOD_CATEGORY_ORDER.filter(c => byCategory[c]);
+        return (
+          <div className="macro-section" key={section.id}>
+            <div className="macro-section-header">{section.label}</div>
+            {sortedCats.map(cat => (
+              <div key={cat}>
+                <div className="food-cat-header">{cat}</div>
+                {byCategory[cat].map(i => (
+                  <div className="ing-card" key={i.id}>
+                    <div className="ing-card-name">{i.name}</div>
+                    <div className="ing-card-macros">
+                      P {i.protein}g · G {i.carbs}g · L {i.fat}g
+                      {i.quantity != null && <><br/><span style={{ color: "#3a3a2a" }}>{i.quantity}{i.unit}</span></>}
+                    </div>
+                    <div className="ing-card-kcal">{i.kcal}<span style={{ display: "block", fontSize: "0.5rem", color: "#4a4a3a", letterSpacing: "1px" }}>kcal</span></div>
+                    <button className="del-btn" onClick={() => onDelete(i.id)}>✕</button>
+                  </div>
+                ))}
+              </div>
+            ))}
+          </div>
+        );
+      })}
+    </div>
+  );
 }
 
 function RecipeCard({ r, onAdd, onDelete, onUpdateItems }) {
@@ -233,6 +294,8 @@ export default function App() {
   const [saveCategory, setSaveCategory] = useState("dejeuner");
   const [pendingItems, setPendingItems] = useState([]);
   const [selectedIds,  setSelectedIds]  = useState(new Set());
+  const [ingredients,  setIngredients]  = useState([]);
+  const [recetteTab,   setRecetteTab]   = useState("recettes");
   const textRef = useRef();
 
   const today = new Date();
@@ -251,6 +314,9 @@ export default function App() {
     fetch('/api/recipes')
       .then(r => r.json())
       .then(d => setRecipes(d.recipes || []));
+    fetch('/api/ingredients')
+      .then(r => r.json())
+      .then(d => setIngredients(d.ingredients || []));
   }, []);
 
   useEffect(() => {
@@ -443,29 +509,45 @@ export default function App() {
         {/* RECETTES */}
         {tab === "recettes" && (
           <>
-            <div className="section-label">Mes recettes — {recipes.length}</div>
-            {recipes.length === 0 && (
-              <div className="empty-state">— aucune recette sauvegardée —<br/><br/>Dans le journal, cochez des aliments puis "Créer une recette"</div>
+            <div className="subtabs">
+              <button className={`subtab ${recetteTab === "recettes" ? "active" : ""}`} onClick={() => setRecetteTab("recettes")}>🍲 Recettes</button>
+              <button className={`subtab ${recetteTab === "ingredients" ? "active" : ""}`} onClick={() => setRecetteTab("ingredients")}>🥦 Ingrédients</button>
+            </div>
+
+            {recetteTab === "recettes" && (
+              <>
+                <div className="section-label">Mes recettes — {recipes.length}</div>
+                {recipes.length === 0 && (
+                  <div className="empty-state">— aucune recette sauvegardée —<br/><br/>Dans le journal, cochez des aliments puis "Créer une recette"</div>
+                )}
+                {CATEGORIES.map(cat => {
+                  const catRecipes = recipes.filter(r => r.category === cat.id);
+                  if (catRecipes.length === 0) return null;
+                  return (
+                    <div className="category-group" key={cat.id}>
+                      <div className="category-header">{cat.label}</div>
+                      {catRecipes.map(r => (
+                        <RecipeCard key={r.id} r={r} onAdd={items => addRecipeToDay(items)} onDelete={() => deleteRecipe(r.id)} onUpdateItems={items => updateRecipeItems(r.id, items)} />
+                      ))}
+                    </div>
+                  );
+                })}
+                {recipes.filter(r => !r.category).length > 0 && (
+                  <div className="category-group">
+                    <div className="category-header">Sans catégorie</div>
+                    {recipes.filter(r => !r.category).map(r => (
+                      <RecipeCard key={r.id} r={r} onAdd={items => addRecipeToDay(items)} onDelete={() => deleteRecipe(r.id)} onUpdateItems={items => updateRecipeItems(r.id, items)} />
+                    ))}
+                  </div>
+                )}
+              </>
             )}
-            {CATEGORIES.map(cat => {
-              const catRecipes = recipes.filter(r => r.category === cat.id);
-              if (catRecipes.length === 0) return null;
-              return (
-                <div className="category-group" key={cat.id}>
-                  <div className="category-header">{cat.label}</div>
-                  {catRecipes.map(r => (
-                    <RecipeCard key={r.id} r={r} onAdd={items => addRecipeToDay(items)} onDelete={() => deleteRecipe(r.id)} onUpdateItems={items => updateRecipeItems(r.id, items)} />
-                  ))}
-                </div>
-              );
-            })}
-            {recipes.filter(r => !r.category).length > 0 && (
-              <div className="category-group">
-                <div className="category-header">Sans catégorie</div>
-                {recipes.filter(r => !r.category).map(r => (
-                  <RecipeCard key={r.id} r={r} onAdd={items => addRecipeToDay(items)} onDelete={() => deleteRecipe(r.id)} onUpdateItems={items => updateRecipeItems(r.id, items)} />
-                ))}
-              </div>
+
+            {recetteTab === "ingredients" && (
+              <IngredientLibrary ingredients={ingredients} onDelete={id => {
+                fetch('/api/ingredients', { method: 'DELETE', headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id }) });
+                setIngredients(prev => prev.filter(i => i.id !== id));
+              }} />
             )}
           </>
         )}
