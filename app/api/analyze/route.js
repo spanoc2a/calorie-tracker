@@ -1,4 +1,6 @@
-import { kv } from '@vercel/kv';
+import Redis from 'ioredis';
+
+const redis = new Redis(process.env.storage_REDIS_URL);
 
 export async function POST(req) {
   const { text, date } = await req.json();
@@ -30,10 +32,9 @@ Format exact:
   const parsed = JSON.parse(content.replace(/```json|```/g, "").trim());
   const items = parsed.items.map(i => ({ ...i, id: Date.now() + Math.random() }));
   
-  // Sauvegarde dans KV
   const key = `day:${date}`;
-  const existing = await kv.get(key) || [];
-  await kv.set(key, [...existing, ...items]);
+  const existing = JSON.parse(await redis.get(key) || "[]");
+  await redis.set(key, JSON.stringify([...existing, ...items]));
   
   return Response.json({ items });
 }
