@@ -112,7 +112,8 @@ export default function App() {
   useEffect(() => {
     fetch(`/api/entries?date=${key}`)
       .then(r => r.json())
-      .then(d => setEntries(d.entries || []));
+      .then(d => setEntries(d.entries || []))
+      .catch(e => console.error("Erreur entries:", e));
   }, [key]);
 
   // Charge les recettes
