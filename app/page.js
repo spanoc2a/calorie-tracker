@@ -129,7 +129,7 @@ function scale(item, mult) {
   };
 }
 
-function RecipeCard({ r, onAdd, onDelete }) {
+function RecipeCard({ r, onAdd, onDelete, onUpdateItems }) {
   const [expanded, setExpanded] = useState(false);
   const [qtys,     setQtys]     = useState({});
 
@@ -186,6 +186,7 @@ function RecipeCard({ r, onAdd, onDelete }) {
                   <button onClick={e => { e.stopPropagation(); setQty(i.id, +((getRatio(i) + 0.5).toFixed(1))); }}>+</button>
                 </div>
               )}
+              <button className="del-btn" onClick={e => { e.stopPropagation(); onUpdateItems(r.items.filter(x => x.id !== i.id)); }} title="Supprimer">✕</button>
             </div>
           ))}
         </div>
@@ -321,6 +322,12 @@ export default function App() {
     setRecipes(prev => prev.filter(r => r.id !== id));
   }
 
+  async function updateRecipeItems(id, items) {
+    if (items.length === 0) { deleteRecipe(id); return; }
+    await fetch('/api/recipes', { method: 'PATCH', headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id, items }) });
+    setRecipes(prev => prev.map(r => r.id === id ? { ...r, items } : r));
+  }
+
   const maxKcal = Math.max(...weekData.map(d => d.kcal), goal);
 
   return (
@@ -435,7 +442,7 @@ export default function App() {
                 <div className="category-group" key={cat.id}>
                   <div className="category-header">{cat.label}</div>
                   {catRecipes.map(r => (
-                    <RecipeCard key={r.id} r={r} onAdd={items => addRecipeToDay(items)} onDelete={() => deleteRecipe(r.id)} />
+                    <RecipeCard key={r.id} r={r} onAdd={items => addRecipeToDay(items)} onDelete={() => deleteRecipe(r.id)} onUpdateItems={items => updateRecipeItems(r.id, items)} />
                   ))}
                 </div>
               );
@@ -444,7 +451,7 @@ export default function App() {
               <div className="category-group">
                 <div className="category-header">Sans catégorie</div>
                 {recipes.filter(r => !r.category).map(r => (
-                  <RecipeCard key={r.id} r={r} onAdd={items => addRecipeToDay(items)} onDelete={() => deleteRecipe(r.id)} />
+                  <RecipeCard key={r.id} r={r} onAdd={items => addRecipeToDay(items)} onDelete={() => deleteRecipe(r.id)} onUpdateItems={items => updateRecipeItems(r.id, items)} />
                 ))}
               </div>
             )}

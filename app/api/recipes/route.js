@@ -13,6 +13,14 @@ export async function POST(req) {
   return Response.json({ recipe: newRecipe });
 }
 
+export async function PATCH(req) {
+  const { id, items } = await req.json();
+  const recipes = await db.get('recipes') || [];
+  const updated = recipes.map(r => r.id === id ? { ...r, items } : r);
+  await db.set('recipes', updated);
+  return Response.json({ ok: true });
+}
+
 export async function DELETE(req) {
   const { id } = await req.json();
   const recipes = await db.get('recipes') || [];
