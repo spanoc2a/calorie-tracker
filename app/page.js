@@ -54,7 +54,11 @@ const STYLE = `
   .entry-icon { font-size: 1.4rem; flex-shrink: 0; margin-top: 1px; }
   .entry-info { flex: 1; min-width: 0; }
   .entry-name { font-size: 0.8rem; color: #e8e0d0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .entry-name.clickable { cursor: pointer; }
   .entry-macros { font-size: 0.62rem; color: #5a5a4a; margin-top: 3px; }
+  .journal-ing-list { margin-top: 8px; padding-top: 8px; border-top: 1px solid #222; width: 100%; }
+  .journal-ing-row { display: flex; justify-content: space-between; font-size: 0.65rem; color: #5a5a4a; padding: 3px 0; }
+  .journal-ing-row span:first-child { color: #8a8070; }
   .entry-kcal { font-family: 'Playfair Display', serif; font-size: 1.1rem; color: #c8b890; flex-shrink: 0; text-align: right; }
   .entry-kcal span { display: block; font-family: 'DM Mono', monospace; font-size: 0.55rem; color: #4a4a3a; letter-spacing: 1px; }
   .del-btn { background: none; border: none; color: #3a3a2a; cursor: pointer; font-size: 0.9rem; padding: 0; margin-left: 4px; flex-shrink: 0; transition: color 0.2s; align-self: center; }
@@ -148,6 +152,34 @@ function scale(item, mult) {
     carbs:   Math.round(item.carbs   * mult * 10) / 10,
     fat:     Math.round(item.fat     * mult * 10) / 10,
   };
+}
+
+function JournalRecipeEntry({ e, isSelected, onSelect, onDelete }) {
+  const [expanded, setExpanded] = useState(false);
+  return (
+    <div className={`entry ${isSelected ? "selected" : ""}`} key={e.id} style={{ flexWrap: "wrap", alignItems: "flex-start" }}>
+      <input type="checkbox" className="entry-check" checked={isSelected} onChange={onSelect} />
+      <div style={{ fontSize: "1.4rem", flexShrink: 0, marginTop: 1 }}>🍲</div>
+      <div className="entry-info" style={{ flex: 1, minWidth: 0 }}>
+        <div className="entry-name clickable" onClick={() => setExpanded(v => !v)}>
+          {e.name} <span style={{ fontSize: "0.6rem", color: "#4a4a3a" }}>{expanded ? "▲" : "▼"}</span>
+        </div>
+        <div className="entry-macros">P {Math.round(e.protein)}g · G {Math.round(e.carbs)}g · L {Math.round(e.fat)}g</div>
+        {expanded && (
+          <div className="journal-ing-list">
+            {(e.items || []).map(i => (
+              <div className="journal-ing-row" key={i.id}>
+                <span>{i.name}{i.quantity != null ? ` · ${i.quantity}${i.unit}` : ""}</span>
+                <span>{i.kcal} kcal</span>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+      <div className="entry-kcal">{e.kcal}<span>kcal</span></div>
+      <button className="del-btn" onClick={onDelete}>✕</button>
+    </div>
+  );
 }
 
 const MACRO_SECTIONS = [
@@ -354,7 +386,7 @@ function RecipeCard({ r, onAdd, onDelete, onUpdateItems }) {
 
       <div className="recipe-actions">
         <button className="btn" style={{ fontSize: "0.65rem", padding: "7px 12px" }}
-          onClick={() => onAdd(scaledItems)}>
+          onClick={() => onAdd(scaledItems, r.name)}>
           ➕ Ajouter
         </button>
         <button className="btn danger" style={{ fontSize: "0.65rem", padding: "7px 12px" }}
@@ -475,8 +507,10 @@ export default function App() {
     }
   }
 
-  async function addRecipeToDay(scaledItems) {
-    const res  = await fetch('/api/entries', { method: 'POST', headers: { "Content-Type": "application/json" }, body: JSON.stringify({ date: key, items: scaledItems }) });
+  async function addRecipeToDay(scaledItems, recipeName) {
+    const totals = scaledItems.reduce((acc, i) => ({ kcal: acc.kcal + i.kcal, protein: acc.protein + i.protein, carbs: acc.carbs + i.carbs, fat: acc.fat + i.fat }), { kcal: 0, protein: 0, carbs: 0, fat: 0 });
+    const entry = { type: "recipe", name: recipeName, items: scaledItems, ...totals };
+    const res  = await fetch('/api/entries', { method: 'POST', headers: { "Content-Type": "application/json" }, body: JSON.stringify({ date: key, items: [entry] }) });
     const data = await res.json();
     setEntries(prev => [...prev, ...data.items]);
     setTab("journal");
@@ -575,7 +609,9 @@ export default function App() {
                     </button>
                   </div>
                 )}
-                {[...entries].reverse().map(e => (
+                {[...entries].reverse().map(e => e.type === "recipe" ? (
+                  <JournalRecipeEntry key={e.id} e={e} isSelected={selectedIds.has(e.id)} onSelect={() => toggleSelect(e.id)} onDelete={() => removeEntry(e.id)} />
+                ) : (
                   <div className={`entry ${selectedIds.has(e.id) ? "selected" : ""}`} key={e.id}>
                     <input type="checkbox" className="entry-check" checked={selectedIds.has(e.id)} onChange={() => toggleSelect(e.id)} />
                     <div className="entry-icon">{getIcon(e.name)}</div>
@@ -614,7 +650,7 @@ export default function App() {
                     <div className="category-group" key={cat.id}>
                       <div className="category-header">{cat.label}</div>
                       {catRecipes.map(r => (
-                        <RecipeCard key={r.id} r={r} onAdd={items => addRecipeToDay(items)} onDelete={() => deleteRecipe(r.id)} onUpdateItems={items => updateRecipeItems(r.id, items)} />
+                        <RecipeCard key={r.id} r={r} onAdd={(items, name) => addRecipeToDay(items, name)} onDelete={() => deleteRecipe(r.id)} onUpdateItems={items => updateRecipeItems(r.id, items)} />
                       ))}
                     </div>
                   );
@@ -623,7 +659,7 @@ export default function App() {
                   <div className="category-group">
                     <div className="category-header">Sans catégorie</div>
                     {recipes.filter(r => !r.category).map(r => (
-                      <RecipeCard key={r.id} r={r} onAdd={items => addRecipeToDay(items)} onDelete={() => deleteRecipe(r.id)} onUpdateItems={items => updateRecipeItems(r.id, items)} />
+                      <RecipeCard key={r.id} r={r} onAdd={(items, name) => addRecipeToDay(items, name)} onDelete={() => deleteRecipe(r.id)} onUpdateItems={items => updateRecipeItems(r.id, items)} />
                     ))}
                   </div>
                 )}
