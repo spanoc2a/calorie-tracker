@@ -6,9 +6,9 @@ export async function GET() {
 }
 
 export async function POST(req) {
-  const { name, items } = await req.json();
+  const { name, category, items } = await req.json();
   const recipes = await db.get('recipes') || [];
-  const newRecipe = { id: Date.now(), name, items };
+  const newRecipe = { id: Date.now(), name, category, items };
   await db.set('recipes', [...recipes, newRecipe]);
   return Response.json({ recipe: newRecipe });
 }

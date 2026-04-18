@@ -65,9 +65,17 @@ const STYLE = `
   .goal-row input:focus { border-color: #c8b890; }
   .goal-row .kcal-label { font-size: 0.6rem; color: #4a4a3a; }
   .recipe-card { background: #1a1a1a; border: 1px solid #222; border-radius: 12px; padding: 14px; margin-bottom: 8px; }
-  .recipe-card .recipe-name { font-family: 'Playfair Display', serif; font-size: 1rem; color: #f0e6c8; margin-bottom: 6px; }
+  .recipe-card .recipe-name { font-family: 'Playfair Display', serif; font-size: 1rem; color: #f0e6c8; margin-bottom: 4px; }
   .recipe-card .recipe-info { font-size: 0.65rem; color: #5a5a4a; margin-bottom: 10px; }
-  .recipe-actions { display: flex; gap: 8px; }
+  .recipe-actions { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+  .portion-ctrl { display: flex; align-items: center; gap: 6px; margin-left: auto; }
+  .portion-ctrl button { background: #2a2a2a; border: 1px solid #3a3a2a; color: #c8b890; border-radius: 6px; width: 26px; height: 26px; font-size: 1rem; cursor: pointer; display: flex; align-items: center; justify-content: center; line-height: 1; }
+  .portion-ctrl button:hover { background: #3a3a2a; }
+  .portion-val { font-size: 0.72rem; color: #c8b890; min-width: 28px; text-align: center; }
+  .category-group { margin-bottom: 4px; }
+  .category-header { font-size: 0.6rem; color: #4a4a3a; letter-spacing: 3px; text-transform: uppercase; margin: 16px 0 8px; padding-left: 2px; border-bottom: 1px solid #1e1e1e; padding-bottom: 6px; }
+  .cat-select { width: 100%; background: #0d0d0d; border: 1px solid #2a2a2a; border-radius: 8px; padding: 10px 12px; color: #e8e0d0; font-family: 'DM Mono', monospace; font-size: 0.8rem; outline: none; margin-bottom: 12px; appearance: none; }
+  .cat-select:focus { border-color: #c8b890; }
   .week-chart { background: #1a1a1a; border: 1px solid #2a2a2a; border-radius: 14px; padding: 16px; margin-bottom: 20px; }
   .week-chart .chart-title { font-size: 0.6rem; color: #4a4a3a; letter-spacing: 3px; text-transform: uppercase; margin-bottom: 16px; }
   .bars { display: flex; align-items: flex-end; gap: 6px; height: 80px; }
@@ -88,6 +96,43 @@ function dateKey(d) { return d.toISOString().split("T")[0]; }
 function formatDate(d) { return d.toLocaleDateString("fr-FR", { weekday: "long", day: "numeric", month: "long" }); }
 function getIcon(name) { return MEAL_ICONS[name.charCodeAt(0) % MEAL_ICONS.length]; }
 const DAYS = ["Dim","Lun","Mar","Mer","Jeu","Ven","Sam"];
+const CATEGORIES = [
+  { id: "petit_dej", label: "Petit déjeuner" },
+  { id: "collation_matin", label: "Collation matin" },
+  { id: "dejeuner", label: "Déjeuner" },
+  { id: "collation_am", label: "Collation après-midi" },
+  { id: "diner", label: "Dîner" },
+];
+
+function RecipeCard({ r, portions, setPortions, onAdd, onDelete }) {
+  const p = portions[r.id] || 1;
+  const totalKcal = Math.round(r.items.reduce((a, i) => a + i.kcal, 0) * p);
+  function changePortion(delta) {
+    setPortions(prev => ({ ...prev, [r.id]: Math.max(0.5, +(((prev[r.id] || 1) + delta).toFixed(1))) }));
+  }
+  return (
+    <div className="recipe-card">
+      <div className="recipe-name">{r.name}</div>
+      <div className="recipe-info">
+        {r.items.length} ingrédient{r.items.length > 1 ? "s" : ""} · {totalKcal} kcal
+        {p !== 1 && <span style={{ color: "#c8b890" }}> ({p}x)</span>}
+      </div>
+      <div className="recipe-actions">
+        <button className="btn" style={{ fontSize: "0.65rem", padding: "7px 12px" }} onClick={onAdd}>
+          ➕ Ajouter
+        </button>
+        <button className="btn danger" style={{ fontSize: "0.65rem", padding: "7px 12px" }} onClick={onDelete}>
+          🗑
+        </button>
+        <div className="portion-ctrl">
+          <button onClick={() => changePortion(-0.5)}>−</button>
+          <span className="portion-val">{p}×</span>
+          <button onClick={() => changePortion(0.5)}>+</button>
+        </div>
+      </div>
+    </div>
+  );
+}
 
 export default function App() {
   const [tab, setTab] = useState("journal");
@@ -101,7 +146,9 @@ export default function App() {
   const [weekData, setWeekData] = useState([]);
   const [saveModal, setSaveModal] = useState(false);
   const [recipeName, setRecipeName] = useState("");
+  const [saveCategory, setSaveCategory] = useState("dejeuner");
   const [pendingItems, setPendingItems] = useState([]);
+  const [portions, setPortions] = useState({});
   const textRef = useRef();
 
   const today = new Date();
@@ -186,7 +233,7 @@ export default function App() {
       const res = await fetch('/api/recipes', {
         method: 'POST',
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name: recipeName, items: pendingItems }),
+        body: JSON.stringify({ name: recipeName, category: saveCategory, items: pendingItems }),
       });
       const data = await res.json();
       setRecipes(prev => [...prev, data.recipe]);
@@ -198,10 +245,18 @@ export default function App() {
     }
   }
   async function addRecipeToDay(recipe) {
-    const res = await fetch("/api/analyze", {
-      method: "POST",
+    const p = portions[recipe.id] || 1;
+    const scaled = recipe.items.map(i => ({
+      name: i.name,
+      kcal: Math.round(i.kcal * p),
+      protein: Math.round(i.protein * p * 10) / 10,
+      carbs: Math.round(i.carbs * p * 10) / 10,
+      fat: Math.round(i.fat * p * 10) / 10,
+    }));
+    const res = await fetch('/api/entries', {
+      method: 'POST',
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ text: recipe.items.map(i => i.name).join(", "), date: key }),
+      body: JSON.stringify({ date: key, items: scaled }),
     });
     const data = await res.json();
     setEntries(prev => [...prev, ...data.items]);
@@ -316,22 +371,22 @@ export default function App() {
           <>
             <div className="section-label">Mes recettes — {recipes.length}</div>
             {recipes.length === 0 && <div className="empty-state">— aucune recette sauvegardée —<br/><br/>Analyse un repas et clique "Sauvegarder comme recette"</div>}
-            {recipes.map(r => (
-              <div className="recipe-card" key={r.id}>
-                <div className="recipe-name">{r.name}</div>
-                <div className="recipe-info">
-                  {r.items.length} ingrédient{r.items.length > 1 ? "s" : ""} · {r.items.reduce((a, i) => a + i.kcal, 0)} kcal
+            {CATEGORIES.map(cat => {
+              const catRecipes = recipes.filter(r => r.category === cat.id);
+              if (catRecipes.length === 0) return null;
+              return (
+                <div className="category-group" key={cat.id}>
+                  <div className="category-header">{cat.label}</div>
+                  {catRecipes.map(r => <RecipeCard key={r.id} r={r} portions={portions} setPortions={setPortions} onAdd={() => { setTab("journal"); addRecipeToDay(r); }} onDelete={() => deleteRecipe(r.id)} />)}
                 </div>
-                <div className="recipe-actions">
-                  <button className="btn" style={{ fontSize: "0.65rem", padding: "7px 12px" }} onClick={() => { setTab("journal"); addRecipeToDay(r); }}>
-                    ➕ Ajouter au journal
-                  </button>
-                  <button className="btn danger" style={{ fontSize: "0.65rem", padding: "7px 12px" }} onClick={() => deleteRecipe(r.id)}>
-                    🗑 Supprimer
-                  </button>
-                </div>
+              );
+            })}
+            {recipes.filter(r => !r.category).length > 0 && (
+              <div className="category-group">
+                <div className="category-header">Sans catégorie</div>
+                {recipes.filter(r => !r.category).map(r => <RecipeCard key={r.id} r={r} portions={portions} setPortions={setPortions} onAdd={() => { setTab("journal"); addRecipeToDay(r); }} onDelete={() => deleteRecipe(r.id)} />)}
               </div>
-            ))}
+            )}
           </>
         )}
 
@@ -381,6 +436,9 @@ export default function App() {
               onKeyDown={e => e.key === "Enter" && saveRecipe()}
               autoFocus
             />
+            <select className="cat-select" value={saveCategory} onChange={e => setSaveCategory(e.target.value)}>
+              {CATEGORIES.map(c => <option key={c.id} value={c.id}>{c.label}</option>)}
+            </select>
             <div className="modal-actions">
               <button className="btn" onClick={saveRecipe} disabled={!recipeName.trim()}>Sauvegarder</button>
               <button className="btn secondary" onClick={() => setSaveModal(false)}>Annuler</button>

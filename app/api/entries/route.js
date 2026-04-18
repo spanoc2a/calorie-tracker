@@ -7,6 +7,15 @@ export async function GET(req) {
   return Response.json({ entries });
 }
 
+export async function POST(req) {
+  const { date, items } = await req.json();
+  const key = `day:${date}`;
+  const existing = await db.get(key) || [];
+  const newItems = items.map(i => ({ ...i, id: Date.now() + Math.random() }));
+  await db.set(key, [...existing, ...newItems]);
+  return Response.json({ items: newItems });
+}
+
 export async function DELETE(req) {
   const { date, id } = await req.json();
   const key = `day:${date}`;
