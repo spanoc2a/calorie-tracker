@@ -14,9 +14,9 @@ export async function POST(req) {
 }
 
 export async function PATCH(req) {
-  const { id, items } = await req.json();
+  const { id, items, name } = await req.json();
   const recipes = await db.get('recipes') || [];
-  const updated = recipes.map(r => r.id === id ? { ...r, items } : r);
+  const updated = recipes.map(r => r.id === id ? { ...r, ...(items !== undefined && { items }), ...(name !== undefined && { name }) } : r);
   await db.set('recipes', updated);
   return Response.json({ ok: true });
 }

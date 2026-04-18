@@ -73,9 +73,12 @@ const STYLE = `
   .goal-row input:focus { border-color: #c8b890; }
   .goal-row .kcal-label { font-size: 0.6rem; color: #4a4a3a; }
   .recipe-card { background: #1a1a1a; border: 1px solid #222; border-radius: 12px; padding: 14px; margin-bottom: 8px; }
-  .recipe-header { display: flex; align-items: center; justify-content: space-between; cursor: pointer; user-select: none; margin-bottom: 4px; }
-  .recipe-card .recipe-name { font-family: 'Playfair Display', serif; font-size: 1rem; color: #f0e6c8; }
-  .recipe-toggle { font-size: 0.65rem; color: #4a4a3a; }
+  .recipe-header { display: flex; align-items: center; justify-content: space-between; cursor: pointer; user-select: none; margin-bottom: 4px; gap: 8px; }
+  .recipe-card .recipe-name { font-family: 'Playfair Display', serif; font-size: 1rem; color: #f0e6c8; flex: 1; min-width: 0; }
+  .recipe-name-input { font-family: 'Playfair Display', serif; font-size: 1rem; color: #f0e6c8; background: #0d0d0d; border: 1px solid #c8b890; border-radius: 6px; padding: 2px 8px; outline: none; width: 100%; }
+  .recipe-toggle { font-size: 0.65rem; color: #4a4a3a; flex-shrink: 0; }
+  .edit-name-btn { background: none; border: none; color: #3a3a2a; cursor: pointer; font-size: 0.75rem; padding: 2px 4px; flex-shrink: 0; transition: color 0.2s; }
+  .edit-name-btn:hover { color: #c8b890; }
   .recipe-card .recipe-info { font-size: 0.65rem; color: #5a5a4a; margin-bottom: 10px; }
   .ingredient-list { border-top: 1px solid #222; padding-top: 10px; margin-bottom: 10px; }
   .ingredient-row { display: flex; align-items: center; gap: 8px; padding: 6px 0; border-bottom: 1px solid #161616; }
@@ -308,9 +311,12 @@ function IngredientLibrary({ ingredients, onDelete, onCreateRecipe }) {
   );
 }
 
-function RecipeCard({ r, onAdd, onDelete, onUpdateItems }) {
-  const [expanded, setExpanded] = useState(false);
-  const [qtys,     setQtys]     = useState({});
+function RecipeCard({ r, onAdd, onDelete, onUpdateItems, onRename }) {
+  const [expanded,  setExpanded]  = useState(false);
+  const [qtys,      setQtys]      = useState({});
+  const [editingName, setEditingName] = useState(false);
+  const [nameVal,     setNameVal]     = useState(r.name);
+  const nameRef = useRef();
 
   function getRatio(i) {
     if (i.quantity && i.quantity > 0) {
@@ -339,11 +345,31 @@ function RecipeCard({ r, onAdd, onDelete, onUpdateItems }) {
   const totalKcal   = scaledItems.reduce((a, i) => a + i.kcal, 0);
   const hasChanges  = r.items.some(i => getRatio(i) !== 1);
 
+  function commitRename() {
+    const trimmed = nameVal.trim();
+    if (trimmed && trimmed !== r.name) onRename(trimmed);
+    else setNameVal(r.name);
+    setEditingName(false);
+  }
+
   return (
     <div className="recipe-card">
-      <div className="recipe-header" onClick={() => setExpanded(e => !e)}>
-        <div className="recipe-name">{r.name}</div>
-        <span className="recipe-toggle">{expanded ? "▲" : "▼"}</span>
+      <div className="recipe-header">
+        {editingName ? (
+          <input
+            ref={nameRef}
+            className="recipe-name-input"
+            value={nameVal}
+            onChange={e => setNameVal(e.target.value)}
+            onBlur={commitRename}
+            onKeyDown={e => { if (e.key === "Enter") commitRename(); if (e.key === "Escape") { setNameVal(r.name); setEditingName(false); } }}
+            onClick={e => e.stopPropagation()}
+          />
+        ) : (
+          <div className="recipe-name" onClick={() => setExpanded(e => !e)}>{r.name}</div>
+        )}
+        <button className="edit-name-btn" onClick={e => { e.stopPropagation(); setEditingName(true); setTimeout(() => nameRef.current?.select(), 0); }} title="Renommer">✎</button>
+        <span className="recipe-toggle" onClick={() => setExpanded(e => !e)}>{expanded ? "▲" : "▼"}</span>
       </div>
       <div className="recipe-info">
         {r.items.length} ingrédient{r.items.length > 1 ? "s" : ""} · {totalKcal} kcal
@@ -527,6 +553,11 @@ export default function App() {
     setRecipes(prev => prev.map(r => r.id === id ? { ...r, items } : r));
   }
 
+  async function renameRecipe(id, name) {
+    await fetch('/api/recipes', { method: 'PATCH', headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id, name }) });
+    setRecipes(prev => prev.map(r => r.id === id ? { ...r, name } : r));
+  }
+
   const maxKcal = Math.max(...weekData.map(d => d.kcal), goal);
 
   return (
@@ -650,7 +681,7 @@ export default function App() {
                     <div className="category-group" key={cat.id}>
                       <div className="category-header">{cat.label}</div>
                       {catRecipes.map(r => (
-                        <RecipeCard key={r.id} r={r} onAdd={(items, name) => addRecipeToDay(items, name)} onDelete={() => deleteRecipe(r.id)} onUpdateItems={items => updateRecipeItems(r.id, items)} />
+                        <RecipeCard key={r.id} r={r} onAdd={(items, name) => addRecipeToDay(items, name)} onDelete={() => deleteRecipe(r.id)} onUpdateItems={items => updateRecipeItems(r.id, items)} onRename={name => renameRecipe(r.id, name)} />
                       ))}
                     </div>
                   );
@@ -659,7 +690,7 @@ export default function App() {
                   <div className="category-group">
                     <div className="category-header">Sans catégorie</div>
                     {recipes.filter(r => !r.category).map(r => (
-                      <RecipeCard key={r.id} r={r} onAdd={(items, name) => addRecipeToDay(items, name)} onDelete={() => deleteRecipe(r.id)} onUpdateItems={items => updateRecipeItems(r.id, items)} />
+                      <RecipeCard key={r.id} r={r} onAdd={(items, name) => addRecipeToDay(items, name)} onDelete={() => deleteRecipe(r.id)} onUpdateItems={items => updateRecipeItems(r.id, items)} onRename={name => renameRecipe(r.id, name)} />
                     ))}
                   </div>
                 )}
