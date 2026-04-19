@@ -203,9 +203,10 @@ function getMacros(ing, qty) {
   return { kcal: Math.round(p.kcal * f), protein: Math.round(p.protein * f * 10) / 10, carbs: Math.round(p.carbs * f * 10) / 10, fat: Math.round(p.fat * f * 10) / 10 };
 }
 
-function IngredientLibrary({ ingredients, onDelete, onCreateRecipe }) {
-  const [selected, setSelected] = useState({});   // { [id]: qty }
-  const [qtys,     setQtys]     = useState({});   // editing state
+function IngredientLibrary({ ingredients, onDelete, onCreateRecipe, onAddToJournal }) {
+  const [selected,  setSelected]  = useState({});  // { [id]: qty } — pour créer une recette
+  const [recipeQtys, setRecipeQtys] = useState({});
+  const [adding,    setAdding]    = useState({});   // { [id]: qty } — pour ajouter au journal
 
   function toggleSelect(ing) {
     setSelected(prev => {
@@ -214,16 +215,28 @@ function IngredientLibrary({ ingredients, onDelete, onCreateRecipe }) {
     });
   }
 
+  function startAdd(ing) {
+    setAdding(prev => ({ ...prev, [ing.id]: ing.per100 ? 100 : 1 }));
+  }
+  function cancelAdd(id) {
+    setAdding(prev => { const s = { ...prev }; delete s[id]; return s; });
+  }
+  function confirmAdd(ing) {
+    const qty = adding[ing.id];
+    if (qty > 0) onAddToJournal(ing, qty);
+    cancelAdd(ing.id);
+  }
+
   const selectedList = ingredients.filter(i => selected[i.id] != null);
   const totals = selectedList.reduce((acc, i) => {
-    const qty = qtys[i.id] ?? selected[i.id];
+    const qty = recipeQtys[i.id] ?? selected[i.id];
     const m = getMacros(i, qty);
     return { kcal: acc.kcal + m.kcal, protein: acc.protein + m.protein, carbs: acc.carbs + m.carbs, fat: acc.fat + m.fat };
   }, { kcal: 0, protein: 0, carbs: 0, fat: 0 });
 
   function buildItems() {
     return selectedList.map(i => {
-      const qty = qtys[i.id] ?? selected[i.id];
+      const qty = recipeQtys[i.id] ?? selected[i.id];
       const m = getMacros(i, qty);
       return { id: Date.now() + Math.random(), name: i.name, quantity: qty, unit: i.baseUnit, ...m };
     });
@@ -254,27 +267,53 @@ function IngredientLibrary({ ingredients, onDelete, onCreateRecipe }) {
                 <div className="food-cat-header">{cat}</div>
                 {byCategory[cat].map(i => {
                   const isSelected = selected[i.id] != null;
-                  const ref = i.per100 ? i.per100 : i.perUnit;
-                  const refLabel = i.per100 ? `/ 100${i.baseUnit}` : `/ ${i.baseUnit}`;
+                  const isAdding   = adding[i.id]   != null;
+                  const ref        = i.per100 ? i.per100 : i.perUnit;
+                  const refLabel   = i.per100 ? `/ 100${i.baseUnit}` : `/ ${i.baseUnit}`;
                   return (
                     <div className={`ing-card ${isSelected ? "selected" : ""}`} key={i.id} style={{ flexWrap: "wrap" }}>
                       <input type="checkbox" className="entry-check" checked={isSelected} onChange={() => toggleSelect(i)} />
                       <div style={{ flex: 1, minWidth: 0 }}>
                         <div className="ing-card-name">{i.name}</div>
                         <div className="ing-card-ref">{ref?.kcal} kcal · P {ref?.protein}g · G {ref?.carbs}g · L {ref?.fat}g {refLabel}</div>
-                        {isSelected && (
+
+                        {/* Ajouter au journal */}
+                        {isAdding ? (
                           <div className="ing-qty-row">
-                            <label>Quantité</label>
                             <input
                               className="ing-qty-input"
                               type="number" min="0" step="any"
-                              value={qtys[i.id] ?? selected[i.id]}
+                              value={adding[i.id]}
                               onFocus={e => e.target.select()}
-                              onChange={e => setQtys(prev => ({ ...prev, [i.id]: +e.target.value }))}
+                              onChange={e => setAdding(prev => ({ ...prev, [i.id]: +e.target.value }))}
+                              autoFocus
                               style={{ width: 60 }}
                             />
                             <span className="ing-unit">{i.baseUnit}</span>
-                            {(() => { const qty = qtys[i.id] ?? selected[i.id]; const m = getMacros(i, qty); return <span style={{ fontSize: "0.6rem", color: "#6b6b5a", marginLeft: 4 }}>= {m.kcal} kcal</span>; })()}
+                            <span style={{ fontSize: "0.6rem", color: "#6b6b5a" }}>= {getMacros(i, adding[i.id]).kcal} kcal</span>
+                            <button className="btn" style={{ fontSize: "0.6rem", padding: "4px 10px" }} onClick={() => confirmAdd(i)}>✓</button>
+                            <button className="btn secondary" style={{ fontSize: "0.6rem", padding: "4px 8px" }} onClick={() => cancelAdd(i.id)}>✕</button>
+                          </div>
+                        ) : (
+                          <div style={{ marginTop: 6 }}>
+                            <button className="btn secondary" style={{ fontSize: "0.6rem", padding: "4px 10px" }} onClick={() => startAdd(i)}>+ Ajouter au journal</button>
+                          </div>
+                        )}
+
+                        {/* Quantité pour créer une recette */}
+                        {isSelected && (
+                          <div className="ing-qty-row">
+                            <label>Recette</label>
+                            <input
+                              className="ing-qty-input"
+                              type="number" min="0" step="any"
+                              value={recipeQtys[i.id] ?? selected[i.id]}
+                              onFocus={e => e.target.select()}
+                              onChange={e => setRecipeQtys(prev => ({ ...prev, [i.id]: +e.target.value }))}
+                              style={{ width: 60 }}
+                            />
+                            <span className="ing-unit">{i.baseUnit}</span>
+                            <span style={{ fontSize: "0.6rem", color: "#6b6b5a" }}>= {getMacros(i, recipeQtys[i.id] ?? selected[i.id]).kcal} kcal</span>
                           </div>
                         )}
                       </div>
@@ -290,7 +329,7 @@ function IngredientLibrary({ ingredients, onDelete, onCreateRecipe }) {
 
       {selectedList.length > 0 && (
         <div className="builder-preview">
-          <h3>Aperçu — {selectedList.length} ingrédient{selectedList.length > 1 ? "s" : ""}</h3>
+          <h3>Aperçu recette — {selectedList.length} ingrédient{selectedList.length > 1 ? "s" : ""}</h3>
           <div className="builder-totals">
             {[{ label: "kcal", val: totals.kcal }, { label: "protéines", val: `${Math.round(totals.protein)}g` }, { label: "glucides", val: `${Math.round(totals.carbs)}g` }, { label: "lipides", val: `${Math.round(totals.fat)}g` }].map(c => (
               <div className="builder-total-cell" key={c.label}>
@@ -300,7 +339,7 @@ function IngredientLibrary({ ingredients, onDelete, onCreateRecipe }) {
             ))}
           </div>
           <div className="builder-items">
-            {selectedList.map(i => { const qty = qtys[i.id] ?? selected[i.id]; return <span key={i.id}>{i.name} {qty}{i.baseUnit} &nbsp;</span>; })}
+            {selectedList.map(i => { const qty = recipeQtys[i.id] ?? selected[i.id]; return <span key={i.id}>{i.name} {qty}{i.baseUnit} &nbsp;</span>; })}
           </div>
           <button className="btn" style={{ width: "100%" }} onClick={() => onCreateRecipe(buildItems())}>
             💾 Créer une recette
@@ -553,6 +592,14 @@ export default function App() {
     setRecipes(prev => prev.map(r => r.id === id ? { ...r, items } : r));
   }
 
+  async function addIngredientToDay(ing, qty) {
+    const m = getMacros(ing, qty);
+    const entry = { name: ing.name, quantity: qty, unit: ing.baseUnit, ...m };
+    const res  = await fetch('/api/entries', { method: 'POST', headers: { "Content-Type": "application/json" }, body: JSON.stringify({ date: key, items: [entry] }) });
+    const data = await res.json();
+    setEntries(prev => [...prev, ...data.items]);
+  }
+
   async function renameRecipe(id, name) {
     await fetch('/api/recipes', { method: 'PATCH', headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id, name }) });
     setRecipes(prev => prev.map(r => r.id === id ? { ...r, name } : r));
@@ -705,6 +752,7 @@ export default function App() {
                   setIngredients(prev => prev.filter(i => i.id !== id));
                 }}
                 onCreateRecipe={items => { setPendingItems(items); setSaveModal(true); }}
+                onAddToJournal={(ing, qty) => addIngredientToDay(ing, qty)}
               />
             )}
           </>
