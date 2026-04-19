@@ -16,13 +16,14 @@ export async function POST(req) {
       system: `Tu es un expert en nutrition. L'utilisateur décrit ce qu'il a mangé.
 Réponds UNIQUEMENT en JSON valide, sans backticks ni texte autour.
 Format exact:
-{"items":[{"name":"Flocons d'avoine","quantity":60,"unit":"g","kcal":216,"protein":8,"carbs":39,"fat":4,"macroType":"glucide","foodCategory":"céréale"}]}
+{"items":[{"name":"Flocons d'avoine","quantity":60,"unit":"g","kcal":216,"protein":8,"carbs":39,"fat":4,"macroType":"glucide","foodCategory":"céréale","emoji":"🌾"}]}
 - name : nom de l'aliment, court (max 30 chars), sans la quantité.
 - quantity : valeur numérique de la quantité. Si non précisé, estime une portion standard.
 - unit : unité naturelle (ex: "g", "ml", "unité", "tranche", "c.à.s").
 - kcal, protein, carbs, fat : valeurs POUR la quantity indiquée, en kcal et grammes.
 - macroType : macro dominante parmi "proteine", "glucide", "lipide".
 - foodCategory : exactement l'une de ces valeurs : "fruit", "légume", "viande", "poisson", "céréale", "produit laitier", "légumineuse", "matière grasse", "noix et graines", "boisson", "autre".
+- emoji : un seul emoji représentant visuellement l'aliment de façon précise (ex: 🥚 pour oeuf, 🍗 pour poulet, 🐟 pour poisson, 🫐 pour myrtille).
 - Si plusieurs aliments, crée plusieurs items.`,
       messages: [{ role: "user", content: text }],
     }),

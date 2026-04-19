@@ -134,10 +134,10 @@ const STYLE = `
   .modal-actions { display: flex; gap: 8px; margin-top: 4px; }
 `;
 
-const MEAL_ICONS = ["🥗","🥩","🍳","🥑","🍎","🥦","🍚","🥛","🍞","🧀","🍗","🥚","🍜","🥜","🫐","🍌"];
+const CATEGORY_EMOJI = { "fruit":"🍎","légume":"🥦","viande":"🥩","poisson":"🐟","céréale":"🌾","produit laitier":"🥛","légumineuse":"🫘","matière grasse":"🧈","noix et graines":"🥜","boisson":"🥤","autre":"🍽️" };
 function dateKey(d) { return d.toISOString().split("T")[0]; }
 function formatDate(d) { return d.toLocaleDateString("fr-FR", { weekday: "long", day: "numeric", month: "long" }); }
-function getIcon(name) { return MEAL_ICONS[name.charCodeAt(0) % MEAL_ICONS.length]; }
+function getIcon(entry) { return entry.emoji || CATEGORY_EMOJI[entry.foodCategory] || "🍽️"; }
 const DAYS = ["Dim","Lun","Mar","Mer","Jeu","Ven","Sam"];
 const CATEGORIES = [
   { id: "petit_dej",       label: "Petit déjeuner" },
@@ -692,7 +692,7 @@ export default function App() {
                 ) : (
                   <div className={`entry ${selectedIds.has(e.id) ? "selected" : ""}`} key={e.id}>
                     <input type="checkbox" className="entry-check" checked={selectedIds.has(e.id)} onChange={() => toggleSelect(e.id)} />
-                    <div className="entry-icon">{getIcon(e.name)}</div>
+                    <div className="entry-icon">{getIcon(e)}</div>
                     <div className="entry-info">
                       <div className="entry-name">{e.name}{e.quantity != null ? <span style={{ color: "#5a5a4a", fontSize: "0.7rem" }}> · {e.quantity}{e.unit}</span> : null}</div>
                       <div className="entry-macros">P {e.protein}g · G {e.carbs}g · L {e.fat}g</div>
