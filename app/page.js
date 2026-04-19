@@ -135,9 +135,30 @@ const STYLE = `
 `;
 
 const CATEGORY_EMOJI = { "fruit":"🍎","légume":"🥦","viande":"🥩","poisson":"🐟","céréale":"🌾","produit laitier":"🥛","légumineuse":"🫘","matière grasse":"🧈","noix et graines":"🥜","boisson":"🥤","autre":"🍽️" };
+const KEYWORD_EMOJI = [
+  [/melon(?!\s*d'eau)/i,"🍈"],[/past[eè]qu|melon d'eau/i,"🍉"],[/banane/i,"🍌"],
+  [/\bpomme\b/i,"🍎"],[/poire\b/i,"🍐"],[/fraise/i,"🍓"],[/cerise/i,"🍒"],
+  [/raisin/i,"🍇"],[/ananas/i,"🍍"],[/mangue/i,"🥭"],[/kiwi/i,"🥝"],
+  [/p[eê]che/i,"🍑"],[/abricot/i,"🍑"],[/citron/i,"🍋"],[/orange/i,"🍊"],
+  [/oeuf|egg/i,"🥚"],[/poulet|volaille|dinde/i,"🍗"],[/boeuf|steak|veau/i,"🥩"],
+  [/porc|jambon|lardons?|bacon/i,"🥩"],[/saumon/i,"🐟"],[/thon/i,"🐟"],
+  [/crevette/i,"🍤"],[/poisson/i,"🐟"],[/riz/i,"🍚"],[/p[âa]te/i,"🍝"],
+  [/pain/i,"🍞"],[/fromage/i,"🧀"],[/lait\b/i,"🥛"],[/yaourt|yogurt/i,"🥛"],
+  [/beurre/i,"🧈"],[/huile/i,"🫒"],[/olive/i,"🫒"],[/avocat/i,"🥑"],
+  [/tomate/i,"🍅"],[/carotte/i,"🥕"],[/brocoli/i,"🥦"],[/salade|laitue/i,"🥗"],
+  [/concombre/i,"🥒"],[/poivron/i,"🫑"],[/maïs/i,"🌽"],[/champignon/i,"🍄"],
+  [/noix\b|noisette|amande|cajou|cacahu/i,"🥜"],[/flocon|avoine/i,"🌾"],
+  [/chocolat/i,"🍫"],[/gâteau|cake/i,"🎂"],[/miel/i,"🍯"],
+  [/caf[eé]/i,"☕"],[/th[eé]\b/i,"🍵"],[/eau\b/i,"💧"],[/jus\b/i,"🥤"],
+  [/lentille|pois\b|haricot|pois chiche/i,"🫘"],
+];
 function dateKey(d) { return d.toISOString().split("T")[0]; }
 function formatDate(d) { return d.toLocaleDateString("fr-FR", { weekday: "long", day: "numeric", month: "long" }); }
-function getIcon(entry) { return entry.emoji || CATEGORY_EMOJI[entry.foodCategory] || "🍽️"; }
+function getIcon(entry) {
+  const name = (entry.name || "").toLowerCase();
+  for (const [re, em] of KEYWORD_EMOJI) { if (re.test(name)) return em; }
+  return entry.emoji || CATEGORY_EMOJI[entry.foodCategory] || "🍽️";
+}
 const DAYS = ["Dim","Lun","Mar","Mer","Jeu","Ven","Sam"];
 const CATEGORIES = [
   { id: "petit_dej",       label: "Petit déjeuner" },
