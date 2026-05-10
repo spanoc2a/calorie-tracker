@@ -1,0 +1,18 @@
+{
+  "name": "nutrainer-video",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "studio": "remotion studio src/index.js",
+    "render:logo": "remotion render src/index.js LogoIntro out/logo-intro.mp4",
+    "render:outro": "remotion render src/index.js Outro out/outro.mp4",
+    "render:stats": "remotion render src/index.js StatsBadge out/stats-badge.mp4",
+    "athletes": "node --env-file=.env scripts/generate-athlete-videos.mjs"
+  },
+  "dependencies": {
+    "@remotion/cli": "^4.0.456",
+    "react": "^19.2.5",
+    "react-dom": "^19.2.5",
+    "remotion": "^4.0.456"
+  }
+}

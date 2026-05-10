@@ -9,9 +9,12 @@
   },
   "dependencies": {
     "@vercel/kv": "^3.0.0",
+    "barcode-detector": "^3.1.2",
     "ioredis": "^5.10.1",
+    "isomorphic-dompurify": "^3.11.0",
     "next": "16.2.4",
     "react": "19.2.4",
-    "react-dom": "19.2.4"
+    "react-dom": "19.2.4",
+    "web-push": "^3.6.7"
   }
 }

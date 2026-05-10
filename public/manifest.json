@@ -1,12 +1,75 @@
 {
-  "name": "Calories",
-  "short_name": "Calories",
-  "start_url": "/",
+  "id": "io.nutrainer.app",
+  "name": "Nutrainer — Nutrition & Performance",
+  "short_name": "Nutrainer",
+  "description": "Suivi nutritionnel intelligent basé sur votre bilan sanguin, votre sport et votre santé. Programme personnalisé chaque jour par l'IA.",
+  "start_url": "https://app.nutrainer.io/login",
+  "scope": "https://app.nutrainer.io/",
   "display": "standalone",
+  "display_override": ["standalone", "minimal-ui"],
+  "orientation": "portrait",
   "background_color": "#0d0d0d",
   "theme_color": "#0d0d0d",
+  "lang": "fr",
+  "dir": "ltr",
+  "categories": ["health", "fitness", "food", "medical"],
+  "iarc_rating_id": "e84b072d-71b3-4d3e-86ae-31a8ce4e53b7",
   "icons": [
-    { "src": "/icon.png", "sizes": "192x192", "type": "image/png" },
-    { "src": "/icon.png", "sizes": "512x512", "type": "image/png" }
-  ]
+    { "src": "/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "maskable" },
+    { "src": "/icon.png",     "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "/icon.png",     "sizes": "512x512", "type": "image/png", "purpose": "maskable" },
+    { "src": "/icon.svg",     "sizes": "any",     "type": "image/svg+xml", "purpose": "any" }
+  ],
+  "screenshots": [
+    { "src": "/api/og", "sizes": "1200x630", "type": "image/png", "form_factor": "wide", "label": "Nutrainer — Nutrition & Performance" }
+  ],
+  "shortcuts": [
+    {
+      "name": "Journal du jour",
+      "short_name": "Journal",
+      "description": "Ajouter des aliments au journal",
+      "url": "https://app.nutrainer.io/",
+      "icons": [{ "src": "/icon-192.png", "sizes": "192x192" }]
+    },
+    {
+      "name": "Bilan sanguin",
+      "short_name": "Bilan",
+      "description": "Voir mon bilan sanguin",
+      "url": "https://app.nutrainer.io/?tab=health",
+      "icons": [{ "src": "/icon-192.png", "sizes": "192x192" }]
+    }
+  ],
+  "launch_handler": {
+    "client_mode": "navigate-existing"
+  },
+  "share_target": {
+    "action": "/",
+    "method": "POST",
+    "enctype": "multipart/form-data",
+    "params": {
+      "title": "title",
+      "text": "text",
+      "url": "url",
+      "files": [{ "name": "image", "accept": ["image/*", "application/pdf"] }]
+    }
+  },
+  "file_handlers": [
+    {
+      "action": "/",
+      "accept": {
+        "image/*": [".jpg", ".jpeg", ".png", ".webp"],
+        "application/pdf": [".pdf"]
+      }
+    }
+  ],
+  "protocol_handlers": [
+    { "protocol": "web+nutrainer", "url": "/?action=%s" }
+  ],
+  "scope_extensions": [],
+  "widgets": [],
+  "edge_side_panel": { "preferred_width": 400 },
+  "note_taking": { "new_note_url": "/" },
+  "related_applications": [],
+  "prefer_related_applications": false
 }

@@ -1,0 +1,10 @@
+[{
+  "relation": ["delegate_permission/common.handle_all_urls"],
+  "target": {
+    "namespace": "android_app",
+    "package_name": "io.nutrainer.app",
+    "sha256_cert_fingerprints": [
+      "4A:F5:3E:22:C0:18:E1:5B:20:61:0D:6A:8B:EC:53:22:36:97:C6:32:99:E6:51:35:58:74:67:BE:75:62:7F:1A"
+    ]
+  }
+}]

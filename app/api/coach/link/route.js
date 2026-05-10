@@ -1,0 +1,59 @@
+import { db, userDb } from '../../../api/db';
+import { requireAuth } from '../../../api/auth/session';
+
+export async function POST(req) {
+  const auth = await requireAuth(req); if (auth.error) return auth.error;
+  const { code } = await req.json();
+  if (!code) return Response.json({ error: 'Code manquant' }, { status: 400 });
+
+  // Nouveau système : token UUID
+  let coachId;
+  let invitePerms = {};
+  const invite = await db.get(`invite:${code}`);
+  if (invite) {
+    if (invite.usedAt) return Response.json({ error: 'Lien déjà utilisé' }, { status: 410 });
+    if (new Date(invite.expiresAt) < new Date()) return Response.json({ error: 'Lien expiré' }, { status: 410 });
+    coachId = invite.coachId;
+    invitePerms = { selfNutritionAllowed: invite.selfNutritionAllowed !== false, selfMuscuAllowed: !!invite.selfMuscuAllowed };
+    // Marquer comme utilisé
+    await db.set(`invite:${code}`, { ...invite, usedAt: new Date().toISOString(), usedBy: auth.userId });
+  } else {
+    // Fallback ancien système
+    coachId = await db.get(`coach:invite:${code.toUpperCase()}`);
+    if (!coachId) return Response.json({ error: 'Lien invalide' }, { status: 404 });
+  }
+
+  if (coachId === auth.userId) return Response.json({ error: 'Vous ne pouvez pas vous lier à vous-même' }, { status: 400 });
+
+  const udb = userDb(auth.userId);
+  const existingCoach = await udb.get('coachId');
+  if (existingCoach === coachId) return Response.json({ error: 'Déjà lié à ce coach' }, { status: 400 });
+
+  await udb.set('coachId', coachId);
+  if (Object.keys(invitePerms).length > 0) {
+    const currentSettings = await udb.get('userSettings') || {};
+    await udb.set('userSettings', { ...currentSettings, ...invitePerms });
+  }
+
+  const athletes = await db.get(`coach:${coachId}:athletes`) || [];
+  if (!athletes.includes(auth.userId)) {
+    await db.set(`coach:${coachId}:athletes`, [...athletes, auth.userId]);
+  }
+
+  const users = await db.get('auth:users') || [];
+  const coach = users.find(u => u.id === coachId);
+  return Response.json({ ok: true, coachName: coach?.name || 'Coach' });
+}
+
+export async function DELETE(req) {
+  const auth = await requireAuth(req); if (auth.error) return auth.error;
+
+  const udb = userDb(auth.userId);
+  const coachId = await udb.get('coachId');
+  if (!coachId) return Response.json({ ok: true });
+
+  await udb.set('coachId', null);
+  const athletes = await db.get(`coach:${coachId}:athletes`) || [];
+  await db.set(`coach:${coachId}:athletes`, athletes.filter(id => id !== auth.userId));
+  return Response.json({ ok: true });
+}
