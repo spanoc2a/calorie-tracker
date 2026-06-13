@@ -34,7 +34,7 @@ export async function POST(req) {
   const token = crypto.randomUUID();
   await db.set(`session:${token}`, { userId: user.id, email: user.email, name: user.name, role: user.role, expiresAt: Date.now() + 10 * 365 * 24 * 3600 * 1000 });
 
-  return Response.json({ user: { id: user.id, email: user.email, name: user.name, role: user.role } }, {
+  return Response.json({ user: { id: user.id, email: user.email, name: user.name, role: user.role }, token }, {
     headers: { 'Set-Cookie': sessionCookie(token) },
   });
 }
