@@ -1,5 +1,5 @@
 import crypto from 'crypto';
-import { db } from '../../db';
+import { db, userDb } from '../../db';
 import { sessionCookie } from '../session';
 import { rateLimit } from '../../../lib/ratelimit';
 import { sendWelcomeEmail } from '../../../lib/email';
@@ -32,11 +32,28 @@ export async function POST(req) {
   await db.set('auth:users', [...users, user]);
 
   const token = crypto.randomUUID();
-  await db.set(`session:${token}`, { userId: id, email: user.email, name, role, expiresAt: Date.now() + 10 * 365 * 24 * 3600 * 1000 });
+  await db.set(`session:${token}`, { userId: id, email: user.email, name, role, expiresAt: Date.now() + 90 * 24 * 3600 * 1000 });
+
+  // Auto-rattachement : si un coach a invité cet email, on lie l'élève DÈS l'inscription
+  // → il atterrit direct en mode coaché, jamais sur le freemium / l'IA.
+  let coachName = null;
+  if (role !== 'coach') {
+    try {
+      const pending = await db.get(`coach:emailInvite:${user.email}`);
+      if (pending?.coachId && pending.coachId !== id) {
+        await userDb(id).set('coachId', pending.coachId);
+        const athletes = await db.get(`coach:${pending.coachId}:athletes`) || [];
+        if (!athletes.includes(id)) await db.set(`coach:${pending.coachId}:athletes`, [...athletes, id]);
+        await db.del(`coach:emailInvite:${user.email}`);
+        const coach = users.find(u => u.id === pending.coachId);
+        coachName = coach?.name || 'ton coach';
+      }
+    } catch {}
+  }
 
   sendWelcomeEmail(user.email, name).catch(e => console.error('[WELCOME]', e));
 
-  return Response.json({ user: { id, email: user.email, name, role } }, {
+  return Response.json({ user: { id, email: user.email, name, role }, token, coachName }, {
     headers: { 'Set-Cookie': sessionCookie(token) },
   });
 }

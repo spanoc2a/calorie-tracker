@@ -319,7 +319,7 @@ export default function MuscuTab({ coachLinked, coachMuscuPrograms = [], selfMus
         ))}
       </div>
     );
-  } else if (!muscuProgram && coachLinked && !selfMuscuAllowed) {
+  } else if (!muscuProgram && coachLinked) {
     content = (
       <div style={{ textAlign:"center", padding:"40px 16px" }}>
         <div style={{ fontSize:"1.6rem", marginBottom:10 }}>💪</div>
@@ -356,7 +356,7 @@ export default function MuscuTab({ coachLinked, coachMuscuPrograms = [], selfMus
             <div style={{ fontSize:"0.62rem", color:"#5a5a4a", letterSpacing:"2px", textTransform:"uppercase" }}>Programme muscu</div>
             {muscuProgram.goal && <div style={{ fontSize:"0.75rem", color:"#c8b890", marginTop:2, textTransform:"capitalize" }}>{muscuProgram.goal} · {muscuProgram.level} · {muscuProgram.equipment}</div>}
           </div>
-          {!coachMuscuProgram && <div style={{ display:"flex", gap:6 }}>
+          {!coachLinked && !coachMuscuProgram && <div style={{ display:"flex", gap:6 }}>
             <button className="btn secondary" style={{ fontSize:"0.6rem", padding:"6px 10px" }} onClick={()=>setMuscuGenOpen(true)}>↺ Regénérer</button>
             <button className="btn danger" style={{ fontSize:"0.6rem", padding:"6px 10px" }} onClick={async()=>{
               await fetch('/api/muscu-program',{method:'DELETE'}); setMuscuProgram(null);

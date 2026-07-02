@@ -12,6 +12,16 @@ function detectLang(req) {
   return ['fr','en','es','de','pt','it'].includes(l) ? l : 'fr';
 }
 
+function detectUnitSystem(req) {
+  const h = req.headers.get('x-unit-system') || '';
+  return h === 'imperial' ? 'imperial' : 'metric';
+}
+
+function unitSystemInstr(unitSystem) {
+  if (unitSystem !== 'imperial') return '';
+  return '\nIMPORTANT: Display all weights in lbs (1 kg = 2.205 lbs), heights in feet/inches, and distances in miles in the report text. Do the conversions yourself.';
+}
+
 function dateKey(d) { return d.toLocaleDateString('fr-CA', { timeZone: 'Europe/Paris' }); }
 
 function calcAge(birthdate) {
@@ -137,7 +147,7 @@ async function fetchFoodSummaryWithHistory(goalsHistory, fallback, udb, days = 9
 }
 
 // ─── Rapport santé ────────────────────────────────────────────────────────────
-async function healthReport(profile, udb, lang = 'fr') {
+async function healthReport(profile, udb, lang = 'fr', unitSystem = 'metric') {
   const bloodTestsRaw = (await udb.get('bloodTests') || []).slice(0, 5).reverse();
   if (bloodTestsRaw.length === 0) return { html: '<p>Aucun bilan de santé importé.</p>' };
 
@@ -160,22 +170,21 @@ async function healthReport(profile, udb, lang = 'fr') {
   const profileCtx = age ? `Patient : ${profile.sex||''}, ${age} ans${profile.weight?', '+profile.weight+' kg':''}` : '';
 
   const langInstr = lang !== 'fr' ? `\nIMPORTANT: Write the entire report in ${LANG_NAMES[lang] || 'English'}.` : '';
-  const system = `Tu es un médecin biologiste rédigeant un compte-rendu clinique de biologie médicale. Ton rôle est d'interpréter les résultats d'analyses médicales, pas de donner des conseils alimentaires généraux.
-HTML simple uniquement : <h2>,<p>,<ul>,<li>,<strong>. Aucun html/head/body/style. Cite toujours les valeurs exactes et les normes de référence.
-IMPORTANT : n'invente JAMAIS de valeurs ou de marqueurs. Cite uniquement les données explicitement fournies.
-Structure OBLIGATOIRE :
-<h2>Interprétation globale du bilan</h2> — statut général, nombre de marqueurs hors norme, gravité
-<h2>Marqueurs normaux — points rassurants</h2> — liste les marqueurs ok avec leurs valeurs
-<h2>Marqueurs à surveiller</h2> — pour chaque marqueur hors norme : valeur observée vs norme, signification clinique, causes possibles
-<h2>Évolution des marqueurs</h2> — si plusieurs bilans : compare les valeurs, note les tendances ↑↓→, quels marqueurs s'améliorent ou se dégradent
-<h2>Compléments nutritionnels à envisager</h2> — uniquement si des marqueurs sont déficients : suppléments ciblés avec dosages
-<h2>Examens complémentaires recommandés</h2> — quels bilans refaire, à quelle échéance, quel médecin consulter
-Important : NE PAS répéter les recommandations alimentaires générales — elles sont couvertes par le rapport nutritionnel séparé.${langInstr}`;
+  const system = `Tu es un médecin biologiste. IMPORTANT : rapport court et dense — maximum 2 phrases par section, chiffres uniquement, pas de prose inutile.
+HTML : <h2>,<p>,<ul>,<li>,<strong> uniquement. Aucun html/head/body/style.
+N'invente JAMAIS de valeurs. Cite uniquement les données fournies.
+Structure OBLIGATOIRE (2 phrases max par section) :
+<h2>Interprétation globale</h2> — statut général + nombre de marqueurs hors norme en 1-2 phrases
+<h2>Marqueurs normaux</h2> — liste <ul> une ligne par marqueur : nom · valeur · norme
+<h2>Marqueurs à surveiller</h2> — liste <ul> : nom · valeur observée vs norme · signification clinique en 5 mots max
+<h2>Évolution</h2> — tendances ↑↓→ si plusieurs bilans, sinon omettre cette section
+<h2>Compléments à envisager</h2> — liste <ul> uniquement si carences : supplément + dosage
+<h2>Actions recommandées</h2> — liste <ul> : prochain bilan, délai, spécialiste si besoin${langInstr}${unitSystemInstr(unitSystem)}`;
 
   const apiRes = await fetch('https://api.anthropic.com/v1/messages', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', 'x-api-key': process.env.ANTHROPIC_API_KEY, 'anthropic-version': '2023-06-01' },
-    body: JSON.stringify({ model: 'claude-sonnet-4-6', max_tokens: 6000, system, messages: [{ role: 'user', content: `${profileCtx}\n${bloodTestsRaw.length} bilan(s).\nMarqueurs :\n${markerLines}\n\nRédige le compte-rendu. Sois concis : 2-3 phrases par section maximum.` }] }),
+    body: JSON.stringify({ model: 'claude-sonnet-4-6', max_tokens: 2500, system, messages: [{ role: 'user', content: `${profileCtx}\n${bloodTestsRaw.length} bilan(s).\nMarqueurs :\n${markerLines}\n\nRédige le compte-rendu concis.` }] }),
   });
   const data = await apiRes.json();
   if (!apiRes.ok) return { error: data.error?.message || `Erreur API ${apiRes.status}` };
@@ -183,7 +192,7 @@ Important : NE PAS répéter les recommandations alimentaires générales — el
 }
 
 // ─── Rapport nutrition + sport ────────────────────────────────────────────────
-async function nutritionReport(profile, udb, lang = 'fr') {
+async function nutritionReport(profile, udb, lang = 'fr', unitSystem = 'metric') {
   const { sex, birthdate, height, weight, goalKcal, goalProtein, goalCarbs, goalFat, days = 90, prevReports = [] } = profile;
   const age = calcAge(birthdate);
 
@@ -194,13 +203,17 @@ async function nutritionReport(profile, udb, lang = 'fr') {
   const dbDays = Math.min(days, 30);
   const dbDates = Array.from({ length: dbDays }, (_, i) => { const d = new Date(); d.setDate(d.getDate() - i); return dateKey(d); });
 
-  const [goalsHistory, bloodTestsRaw, stravaActivities, weightLog, waterEntries, savedSettings] = await Promise.all([
+  const [goalsHistory, bloodTestsRaw, stravaActivities, weightLog, waterEntries, savedSettings, hcData, measurements, checkins, intake] = await Promise.all([
     udb.get('goalsHistory').then(r => r || []),
     udb.get('bloodTests').then(r => (r || []).slice(0, 2)),
     Promise.race([fetchStravaActivities(days, udb), stravaTimeout]),
     udb.get('weightLog').then(r => (r || []).filter(e => e.date >= periodDates[periodDates.length - 1]).sort((a, b) => a.date.localeCompare(b.date))),
     Promise.all(dbDates.map(d => udb.get(`water:${d}`).then(v => ({ date: d, glasses: v || 0 })))).then(arr => arr.filter(e => e.glasses > 0)),
     udb.get('userSettings').then(r => r || {}),
+    udb.get('healthConnectData').then(r => r || null),
+    udb.get('measurements').then(r => r || []),
+    udb.get('checkins').then(r => r || []),
+    udb.get('intake').then(r => r || null),
   ]);
 
   // Priorité aux goals sauvegardés en DB — le frontend peut avoir un état en transit
@@ -318,6 +331,18 @@ IMPORTANT : croise ces données avec l'alimentation réelle — identifie si les
     weightCtx = `\n\nPoids relevé : ${weightLog[0].value||weightLog[0].weight} kg (${weightLog[0].date}) — une seule mesure, pas d'évolution calculable.`;
   }
 
+  // Contexte Health Connect
+  let hcCtx = '';
+  if (hcData) {
+    const parts = [];
+    if (hcData.avgSteps)      parts.push(`Pas/jour moy : ${hcData.avgSteps} (≈${hcData.avgPassiveKcal} kcal passives/j)`);
+    if (hcData.restingHR)     parts.push(`FC repos moy : ${hcData.restingHR} bpm`);
+    if (hcData.hrv)           parts.push(`HRV moy : ${hcData.hrv} ms`);
+    if (hcData.avgSleep)      parts.push(`Sommeil moy : ${hcData.avgSleep}h/nuit`);
+    if (hcData.spo2)          parts.push(`SpO2 moy : ${hcData.spo2}%`);
+    if (parts.length) hcCtx = `\n\nDonnées Health Connect (${hcData.daysWithSteps || '?'} jours enregistrés) :\n${parts.map(p => `- ${p}`).join('\n')}\nUtilise ces données pour affiner l'analyse : les pas influencent les calories passives, la FC repos et HRV indiquent le niveau de récupération, le sommeil impacte les besoins protéiques.`;
+  }
+
   // Contexte hydratation
   let waterCtx = '';
   if (waterEntries.length > 0) {
@@ -326,10 +351,81 @@ IMPORTANT : croise ces données avec l'alimentation réelle — identifie si les
     waterCtx = `\n\nHydratation (suivi sur ${daysTracked} jours enregistrés) :\n- Moyenne : ${avgGlasses} verres/jour (objectif : 8 verres = 2L)\n- Note : l'absence de données les autres jours ne signifie pas un manque d'hydratation — l'utilisateur n'a pas forcément utilisé le suivi ces jours-là.`;
   }
 
+  // ── Composition corporelle (mensurations) — signal de recomposition ──────────
+  const sinceDate = periodDates[periodDates.length - 1];
+  let bodyCompCtx = '';
+  {
+    const inPeriod = (measurements || []).filter(m => m && m.date && m.date >= sinceDate);
+    if (inPeriod.length >= 1) {
+      const sorted = [...inPeriod].sort((a, b) => (a.date || '').localeCompare(b.date || ''));
+      const first = sorted[0], last = sorted[sorted.length - 1];
+      const lines = [];
+      const metrics = [
+        ['Tour de taille', 'waist', 'cm'], ['Tour de poitrine', 'chest', 'cm'],
+        ['Tour de hanches', 'hips', 'cm'], ['Tour de bras', 'arm', 'cm'], ['Tour de cuisse', 'thigh', 'cm'],
+        ['% de graisse', 'bodyFat', '%'], ['Masse musculaire', 'muscleMass', 'kg'],
+      ];
+      for (const [label, key, unit] of metrics) {
+        const va = Number(first[key]), vb = Number(last[key]);
+        if (sorted.length >= 2 && first[key] != null && first[key] !== '' && last[key] != null && last[key] !== '' && isFinite(va) && isFinite(vb)) {
+          const d = Math.round((vb - va) * 10) / 10;
+          lines.push(`- ${label} : ${va}${unit} → ${vb}${unit} (${d > 0 ? '+' : ''}${d}${unit})`);
+        } else if (last[key] != null && last[key] !== '' && isFinite(vb)) {
+          lines.push(`- ${label} : ${vb}${unit} (1 seul relevé)`);
+        }
+      }
+      if (lines.length > 0) {
+        const periodLabel = sorted.length >= 2 ? `${first.date} → ${last.date}` : `relevé du ${last.date}`;
+        bodyCompCtx = `\n\nComposition corporelle (${sorted.length} relevé(s), ${periodLabel}) :\n${lines.join('\n')}\nCroise le poids ET la composition pour évaluer la recomposition : poids stable + masse musculaire ↑ et % graisse ↓ = bonne recomposition ; ne te fie pas au seul poids.`;
+      }
+    }
+  }
+
+  // ── Ressenti hebdomadaire (check-ins) ────────────────────────────────────────
+  let checkinCtx = '';
+  {
+    const inPeriod = (checkins || []).filter(c => c && c.weekDate && c.weekDate >= sinceDate);
+    if (inPeriod.length >= 1) {
+      const avg = (key) => {
+        const vals = inPeriod.map(c => Number(c[key])).filter(v => isFinite(v));
+        return vals.length ? Math.round((vals.reduce((a, v) => a + v, 0) / vals.length) * 10) / 10 : null;
+      };
+      const avgMood = avg('mood'), avgEnergy = avg('energy'), avgSleep = avg('sleep');
+      const parts = [];
+      if (avgMood != null) parts.push(`humeur moy ${avgMood}/5`);
+      if (avgEnergy != null) parts.push(`énergie moy ${avgEnergy}/5`);
+      if (avgSleep != null) parts.push(`sommeil moy ${avgSleep}h/nuit`);
+      const notes = [...inPeriod].sort((a, b) => (b.weekDate || '').localeCompare(a.weekDate || ''))
+        .filter(c => (c.notes || '').trim()).slice(0, 3).map(c => `  - ${c.weekDate} : "${c.notes.trim()}"`);
+      if (parts.length > 0 || notes.length > 0) {
+        checkinCtx = `\n\nRessenti hebdomadaire (${inPeriod.length} check-in(s)) :${parts.length ? `\n- Moyennes : ${parts.join(' · ')}` : ''}${notes.length ? `\n- Notes :\n${notes.join('\n')}` : ''}\nRelie ce ressenti (énergie, sommeil, humeur) à la charge d'entraînement et aux résultats.`;
+      }
+    }
+  }
+
+  // ── Anamnèse (intake) — objectifs, blessures, allergies, mode de vie ─────────
+  let intakeCtx = '';
+  let hasInjuries = false;
+  if (intake) {
+    const parts = [];
+    if ((intake.goals || '').trim()) parts.push(`- Objectifs déclarés : ${intake.goals.trim()}`);
+    if ((intake.injuries || '').trim()) { parts.push(`- Blessures / limitations : ${intake.injuries.trim()}`); hasInjuries = true; }
+    if ((intake.medicalHistory || '').trim()) parts.push(`- Antécédents médicaux : ${intake.medicalHistory.trim()}`);
+    if ((intake.allergies || '').trim()) parts.push(`- Allergies / intolérances : ${intake.allergies.trim()}`);
+    if ((intake.lifestyle || '').trim()) parts.push(`- Mode de vie : ${intake.lifestyle.trim()}`);
+    if ((intake.motivation || '').trim()) parts.push(`- Motivation : ${intake.motivation.trim()}`);
+    if (parts.length > 0) {
+      intakeCtx = `\n\nAnamnèse (questionnaire) :\n${parts.join('\n')}${hasInjuries ? `\nIMPORTANT : respecte les blessures/limitations déclarées — mentionne les contre-indications et propose des alternatives.` : ''}\nAligne les recommandations sur les objectifs déclarés et respecte les allergies dans les suggestions alimentaires.`;
+    }
+  }
+
   const multiPeriod = foodData.periods.length > 1;
   const hasBlood = bloodTestsRaw.length > 0;
   const hasWeight = weightLog.length >= 2;
   const hasWater = waterEntries.length > 0;
+  const hasBodyComp = bodyCompCtx !== '';
+  const hasCheckins = checkinCtx !== '';
+  const hasIntake = intakeCtx !== '';
   const hasPrev = prevReports.length > 0;
 
   // Résumé structuré des rapports précédents
@@ -356,26 +452,27 @@ IMPORTANT : croise ces données avec l'alimentation réelle — identifie si les
   };
 
   const langInstrNut = lang !== 'fr' ? `\nIMPORTANT: Write the entire report in ${LANG_NAMES[lang] || 'English'}.` : '';
-  const system = `Tu es un expert en nutrition sportive, performance et médecine fonctionnelle. Rédige un rapport complet et personnalisé. HTML simple : <h2>,<p>,<ul>,<li>,<strong>. Aucun html/head/body/style. Langue accessible, cite les chiffres réels. Ne tronque JAMAIS le rapport — écris toutes les sections jusqu'à la conclusion.
-IMPORTANT : n'invente JAMAIS de données. Cite uniquement les chiffres explicitement fournis. Si une donnée est absente, indique-le brièvement sans spéculer.${langInstrNut}
-Structure obligatoire :
-<h2>Bilan global</h2>
-<h2>Alimentation</h2>
-${multiPeriod ? '<h2>Évolution des objectifs</h2>' : ''}
-${hasStrava ? '<h2>Activité physique</h2>' : ''}
-${hasStrava ? '<h2>Nutrition & sport — croisement des données</h2>' : ''}
-${hasWeight ? '<h2>Évolution du poids</h2>' : ''}
-${hasBlood ? '<h2>Bilan sanguin & alimentation</h2> — analyse chaque marqueur hors norme, dis explicitement si l\'alimentation observée aggrave ou corrige la situation, cite les aliments manquants ou en excès' : ''}
-${hasPrev ? '<h2>Évolution par rapport aux rapports précédents</h2> — compare chiffre par chiffre' : ''}
-<h2>Points forts</h2>
-<h2>Axes d\'amélioration</h2>
-<h2>Recommandations concrètes</h2>
-<h2>Conclusion</h2>`;
+  const system = `Tu es un expert en nutrition sportive. Rapport télégraphique : 2-3 phrases MAX par section, chiffres uniquement, pas de prose.
+HTML : <h2>,<p>,<ul>,<li>,<strong> uniquement. Aucun html/head/body/style.
+IMPORTANT : n'invente JAMAIS de données. Cite uniquement les chiffres fournis.${langInstrNut}${unitSystemInstr(unitSystem)}
+Base-toi UNIQUEMENT sur les données fournies. Si une information n'est pas disponible (ex. pas de Strava, pas de bilan sanguin, pas de mensurations, pas de check-in…), NE le signale PAS et ne mentionne JAMAIS qu'une donnée manque ou est absente : ignore simplement la section concernée et concentre-toi sur ce qui est disponible. Ne rédige aucune phrase du type « aucune donnée X », « X non fourni », « il manque », « données indisponibles ».
+Structure obligatoire (chaque section = 2-3 phrases max) :
+<h2>Bilan global</h2> — 2 phrases résumant l'essentiel avec les chiffres clés
+<h2>Alimentation</h2> — moy kcal/j vs objectif, moy protéines, écart en %
+${multiPeriod ? '<h2>Évolution des objectifs</h2> — delta entre périodes en chiffres' : ''}
+${hasStrava ? '<h2>Sport</h2> — séances, calories brûlées, bilan net' : ''}
+${hasWeight ? '<h2>Poids</h2> — évolution en kg sur la période' : ''}
+${hasBodyComp ? '<h2>Composition corporelle</h2> — recomposition : circonférences, % graisse, masse musculaire (poids + composition ensemble)' : ''}
+${hasCheckins ? '<h2>Ressenti & adhérence</h2> — énergie/sommeil/humeur reliés à la charge et aux résultats' : ''}
+${hasIntake ? '<h2>Objectifs & contraintes</h2> — objectifs déclarés' + (hasInjuries ? ', blessures à respecter (contre-indications)' : '') + ', allergies' : ''}
+${hasBlood ? '<h2>Bilan sanguin</h2> — marqueurs hors norme vs alimentation observée, aliments manquants' : ''}
+${hasPrev ? '<h2>vs rapport précédent</h2> — amélioration/dégradation chiffre par chiffre' : ''}
+<h2>Recommandations</h2> — 3-5 actions concrètes en liste <ul>`;
 
   const apiRes = await fetch('https://api.anthropic.com/v1/messages', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', 'x-api-key': process.env.ANTHROPIC_API_KEY, 'anthropic-version': '2023-06-01' },
-    body: JSON.stringify({ model: 'claude-sonnet-4-6', max_tokens: 8000, system, messages: [{ role: 'user', content: `Génère le rapport complet sans rien omettre :\n\n${profileCtx}\n\n${foodCtx}${sportCtx}${weightCtx}${waterCtx}${bloodCtx}${prevCtx}` }] }),
+    body: JSON.stringify({ model: 'claude-sonnet-4-6', max_tokens: 6000, system, messages: [{ role: 'user', content: `Génère le rapport :\n\n${profileCtx}${intakeCtx}\n\n${foodCtx}${sportCtx}${weightCtx}${bodyCompCtx}${waterCtx}${hcCtx}${checkinCtx}${bloodCtx}${prevCtx}` }] }),
   });
   const data = await apiRes.json();
   if (!apiRes.ok) return { error: data.error?.message || `Erreur API ${apiRes.status}` };
@@ -405,19 +502,31 @@ export async function POST(req) {
       ? Response.json({ error: 'REPORT_LIMIT', limitLabel: access.limitLabel }, { status: 429 })
       : upgradeResponse('reports');
     const lang = detectLang(req);
+    const unitSystem = detectUnitSystem(req);
     const udb = userDb(auth.userId);
-    const result = body.type === 'health' ? await healthReport(body, udb, lang) : await nutritionReport(body, udb, lang);
+    const result = body.type === 'health' ? await healthReport(body, udb, lang, unitSystem) : await nutritionReport(body, udb, lang, unitSystem);
     if (result.error) return Response.json({ error: result.error }, { status: 500 });
 
-    const title = body.type === 'health' ? 'Rapport médical' : `Rapport nutritionnel ${body.days || 90}j`;
-    // Stocker + push (résultat disponible même si l'app est fermée)
+    const title = body.type === 'health' ? 'Analyse de bilans' : `Rapport nutritionnel ${body.days || 90}j`;
+    const entry = {
+      id: Date.now(),
+      title,
+      days: body.type === 'health' ? 0 : (body.days || 90),
+      date: new Date().toISOString().slice(0, 10),
+      html: result.html,
+      type: body.type || 'nutritionnel',
+      summary: result.summary || null,
+    };
+    // Sauvegarder dans l'historique ET dans latestReport (disponible même si l'app est fermée)
+    const existing = await udb.get('reportHistory') || [];
     await Promise.all([
-      udb.set('latestReport', { html: result.html, title, type: body.type || 'nutritionnel', generatedAt: new Date().toISOString(), seen: false }),
+      udb.set('reportHistory', [entry, ...existing].slice(0, 20)),
+      udb.set('latestReport', { ...entry, generatedAt: new Date().toISOString(), seen: false }),
       import('../push/send/route').then(m => m.sendPushToUser(auth.userId, `📄 ${title} prêt`, 'Appuie pour consulter ton rapport', '/')).catch(() => {}),
     ]).catch(() => {});
 
     await incrementReportUsage(auth.userId, access.usageKey);
-    return Response.json({ html: result.html, summary: result.summary });
+    return Response.json({ html: result.html, summary: result.summary, id: entry.id });
   } catch(e) {
     return Response.json({ error: e.message || 'Erreur interne' }, { status: 500 });
   }

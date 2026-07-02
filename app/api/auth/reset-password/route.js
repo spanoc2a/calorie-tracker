@@ -1,5 +1,6 @@
 import crypto from 'crypto';
 import { db } from '../../db';
+import { rateLimit } from '../../../lib/ratelimit';
 import { sendResetEmail } from '../../../lib/email';
 
 const ITERATIONS = 100_000;
@@ -9,6 +10,10 @@ function hashPassword(password, salt) {
 }
 
 export async function POST(req) {
+  const ip = req.headers.get('x-forwarded-for')?.split(',')[0]?.trim() || 'unknown';
+  const allowed = await rateLimit(`reset-password:${ip}`, 3, 3_600_000);
+  if (!allowed) return Response.json({ error: 'Trop de demandes, réessaie dans une heure' }, { status: 429 });
+
   const { email } = await req.json();
   if (!email) return Response.json({ error: 'Email requis' }, { status: 400 });
 

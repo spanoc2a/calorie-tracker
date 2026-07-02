@@ -42,22 +42,26 @@ export async function POST(req) {
   let text = null;
   let date = null;
   let meal = null;
-  let imageBase64 = null;
-  let imageMime = null;
+  let imageBlocks = [];
 
   if (contentType.includes('multipart/form-data')) {
     const formData = await req.formData();
-    const file = formData.get('image');
+    // Multi-photos : champ "images" (plusieurs), avec compat ascendante sur "image" (une seule)
+    const files = formData.getAll('images');
+    const single = formData.get('image');
+    if (single) files.push(single);
     date = formData.get('date');
     meal = formData.get('meal') || null;
-    if (!file) return Response.json({ error: 'Aucune image fournie' }, { status: 400 });
-    if (!ALLOWED_MIME.includes(file.type)) {
-      return Response.json({ error: 'Format non supporté. Utilise JPEG, PNG ou WebP.' }, { status: 400 });
+    if (!files.length) return Response.json({ error: 'Aucune image fournie' }, { status: 400 });
+    if (files.length > 6) return Response.json({ error: 'Maximum 6 photos par analyse' }, { status: 400 });
+    for (const file of files) {
+      if (!ALLOWED_MIME.includes(file.type)) {
+        return Response.json({ error: 'Format non supporté. Utilise JPEG, PNG ou WebP.' }, { status: 400 });
+      }
+      const bytes = await file.arrayBuffer();
+      if (bytes.byteLength > MAX_IMAGE_BYTES) return Response.json({ error: 'Image trop volumineuse (max 5 Mo)' }, { status: 400 });
+      imageBlocks.push({ type: 'image', source: { type: 'base64', media_type: file.type, data: Buffer.from(bytes).toString('base64') } });
     }
-    const bytes = await file.arrayBuffer();
-    if (bytes.byteLength > MAX_IMAGE_BYTES) return Response.json({ error: 'Image trop volumineuse (max 5 Mo)' }, { status: 400 });
-    imageBase64 = Buffer.from(bytes).toString('base64');
-    imageMime = file.type;
   } else {
     const body = await req.json();
     text = body.text;
@@ -91,14 +95,13 @@ export async function POST(req) {
     }
   }
 
-  const messages = imageBase64
-    ? [{
-        role: 'user',
-        content: [
-          { type: 'image', source: { type: 'base64', media_type: imageMime, data: imageBase64 } },
-          { type: 'text', text: lang === 'en' ? "Identify all visible foods in this meal photo and estimate their quantities and nutritional macros." : lang === 'es' ? "Identifica todos los alimentos visibles en esta foto de comida y estima sus cantidades y macros nutricionales." : "Identifie tous les aliments visibles dans cette photo de repas et estime leurs quantités et macros nutritionnelles." },
-        ],
-      }]
+  const photoPrompt = lang === 'en'
+    ? "These photos show a single meal (possibly several dishes or angles). Identify every visible food, estimate quantities and nutritional macros, and list each distinct food only once (do not double-count the same dish seen from different angles)."
+    : lang === 'es'
+    ? "Estas fotos muestran una sola comida (posiblemente varios platos o ángulos). Identifica cada alimento visible, estima cantidades y macros, y lista cada alimento una sola vez (no cuentes dos veces el mismo plato visto desde otro ángulo)."
+    : "Ces photos montrent un même repas (éventuellement plusieurs plats ou angles). Identifie chaque aliment visible, estime les quantités et macros, et liste chaque aliment distinct une seule fois (ne compte pas deux fois le même plat vu sous un autre angle).";
+  const messages = imageBlocks.length
+    ? [{ role: 'user', content: [...imageBlocks, { type: 'text', text: photoPrompt }] }]
     : [{ role: 'user', content: text }];
 
   const res = await fetch('https://api.anthropic.com/v1/messages', {
@@ -108,7 +111,7 @@ export async function POST(req) {
       'x-api-key': process.env.ANTHROPIC_API_KEY,
       'anthropic-version': '2023-06-01',
     },
-    body: JSON.stringify({ model: 'claude-haiku-4-5-20251001', max_tokens: 1000, system: SYSTEM, messages }),
+    body: JSON.stringify({ model: 'claude-haiku-4-5-20251001', max_tokens: imageBlocks.length ? 2000 : 1000, system: SYSTEM, messages }),
   });
 
   const data = await res.json();

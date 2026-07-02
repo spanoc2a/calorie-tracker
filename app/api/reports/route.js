@@ -1,10 +1,20 @@
 import { userDb } from '../db';
 import { requireAuth } from '../auth/session';
+import { checkReportAccess, isPro, isCoach } from '../../lib/planServer';
 
 export async function GET(req) {
   const auth = await requireAuth(req); if (auth.error) return auth.error;
-  const reports = await userDb(auth.userId).get('reportHistory') || [];
-  return Response.json({ reports });
+  const [reports, access] = await Promise.all([
+    userDb(auth.userId).get('reportHistory'),
+    checkReportAccess(auth.userId, 90),
+  ]);
+  let reportAccess = null;
+  if (access.plan) {
+    if (isCoach(access.plan))    reportAccess = { allowed: true, unlimited: true };
+    else if (isPro(access.plan)) reportAccess = { allowed: access.allowed, count: access.count ?? 0, limit: 1 };
+    else                         reportAccess = { allowed: false };
+  }
+  return Response.json({ reports: reports || [], ...(reportAccess ? { reportAccess } : {}) });
 }
 
 export async function POST(req) {

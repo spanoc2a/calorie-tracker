@@ -1,5 +1,6 @@
 import { db, userDb } from '../../../api/db';
 import { requireAuth } from '../../../api/auth/session';
+import { getHealthContext, buildStravaContext } from '../../../lib/healthContext';
 
 export const maxDuration = 120;
 
@@ -34,7 +35,10 @@ export async function POST(req) {
   if (directProgram) {
     program = { ...directProgram, id: Date.now(), generatedAt: new Date().toISOString(), status: 'draft', sentAt: null };
   } else {
-    const settings = await userDb(athleteId).get('userSettings').then(s => s || {});
+    const [settings, stravaCache] = await Promise.all([
+      userDb(athleteId).get('userSettings').then(s => s || {}),
+      userDb(athleteId).get('stravaCache').then(s => s || null),
+    ]);
     const { sex, weight, height } = settings;
 
     const profileCtx = [`Athlète : ${athlete.name}`, sex && `Sexe : ${sex}`, weight && `Poids : ${weight} kg`, height && `Taille : ${height} cm`].filter(Boolean).join(', ');
@@ -54,7 +58,12 @@ Format exact :
 - Répartition intelligente des groupes musculaires
 - Exercices avec nom précis, sets, reps, temps de repos, note technique si pertinent`;
 
-    const userMsg = [profileCtx, `Objectif : ${goal}`, `Niveau : ${level}`, `Matériel : ${equipment}`, preferences && `Préférences/contraintes : ${preferences}`].filter(Boolean).join('\n');
+    const stravaCtx = buildStravaContext(stravaCache, { periodLabel: '7j' });
+    const stravaInstr = stravaCtx
+      ? `\nIMPORTANT — tiens compte de la charge cardio/endurance RÉELLE ci-dessus (séances Strava) en plus de la muscu : si la charge d'entraînement (suffer_score) est élevée ou le volume cardio important, module le volume/intensité muscu et planifie la récupération en conséquence ; si la charge est faible, marge pour intensifier. Place les séances exigeantes loin des grosses sorties cardio. N'invente AUCUNE donnée absente.`
+      : '';
+
+    const userMsg = [profileCtx, `Objectif : ${goal}`, `Niveau : ${level}`, `Matériel : ${equipment}`, preferences && `Préférences/contraintes : ${preferences}`].filter(Boolean).join('\n') + stravaCtx + stravaInstr + (await getHealthContext(athleteId));
 
     const apiRes = await fetch('https://api.anthropic.com/v1/messages', {
       method: 'POST',
@@ -85,16 +94,33 @@ Format exact :
   return Response.json({ program });
 }
 
+// Récupérer les programmes muscu d'un athlète (coach) — pour afficher le programme actuel.
+export async function GET(req) {
+  const v = await verifyCoach(req); if (v.error) return v.error;
+  const { searchParams } = new URL(req.url);
+  const athleteId = searchParams.get('athleteId');
+  if (!athleteId) return Response.json({ error: 'athleteId manquant' }, { status: 400 });
+
+  const athleteIds = await db.get(`coach:${v.coachId}:athletes`) || [];
+  if (!athleteIds.includes(athleteId)) return Response.json({ error: 'Athlète non lié' }, { status: 403 });
+
+  const programs = await userDb(athleteId).get('coachMuscuPrograms') || [];
+  return Response.json({ programs });
+}
+
 export async function PATCH(req) {
   const v = await verifyCoach(req); if (v.error) return v.error;
-  const { athleteId, programId } = await req.json();
+  // `program` optionnel : contenu édité par le coach, persisté au moment de l'envoi.
+  const { athleteId, programId, program: edited } = await req.json();
 
   const athleteIds = await db.get(`coach:${v.coachId}:athletes`) || [];
   if (!athleteIds.includes(athleteId)) return Response.json({ error: 'Athlète non lié' }, { status: 403 });
 
   const udb = userDb(athleteId);
   const programs = await udb.get('coachMuscuPrograms') || [];
-  const updated = programs.map(p => p.id === programId ? { ...p, status: 'sent', sentAt: new Date().toISOString() } : p);
+  const updated = programs.map(p => p.id === programId
+    ? { ...p, ...(edited || {}), id: p.id, status: 'sent', sentAt: new Date().toISOString() }
+    : p);
   await udb.set('coachMuscuPrograms', updated);
 
   const coach = v.users.find(u => u.id === v.coachId);
@@ -104,7 +130,13 @@ export async function PATCH(req) {
   // Push notification
   try {
     const { sendPushToUser } = await import('../../push/send/route');
-    await sendPushToUser(athleteId, `💪 ${coach?.name || 'Ton coach'}`, 'Ton programme de musculation est prêt !', '/?tab=programme');
+    const { sendExpoPushToUser } = await import('../../../lib/expoPush');
+    const title = `💪 ${coach?.name || 'Ton coach'}`;
+    const body = 'Ton programme de musculation est prêt !';
+    await Promise.all([
+      sendPushToUser(athleteId, title, body, '/?tab=programme'),
+      sendExpoPushToUser(athleteId, title, body, { type: 'coach_muscu' }),
+    ]);
   } catch {}
 
   return Response.json({ ok: true });

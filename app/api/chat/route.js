@@ -1,5 +1,6 @@
 import { db, userDb } from '../db';
 import { requireAuth } from '../auth/session';
+import { signRead } from '../../lib/storage';
 
 async function resolveThread(auth) {
   const users = await db.get('auth:users') || [];
@@ -38,6 +39,11 @@ export async function GET(req) {
   // Compter les non-lus AVANT de les marquer
   const unreadCount = messages.filter(m => m.role !== t.role && !m.read).length;
 
+  // peek=1 : juste le compteur, NE marque PAS comme lu (sondage pastille non-lu).
+  if (searchParams.get('peek')) {
+    return Response.json({ unreadCount });
+  }
+
   // Marquer les messages de l'autre côté comme lus
   let changed = false;
   const updated = messages.map(m => {
@@ -46,13 +52,16 @@ export async function GET(req) {
   });
   if (changed) await db.set(key, updated);
 
-  return Response.json({ messages: updated, unreadCount });
+  // Signe les éventuelles photos jointes (URLs temporaires de lecture).
+  const withUrls = await Promise.all(updated.map(async m => m.image ? { ...m, imageUrl: await signRead(m.image) } : m));
+  return Response.json({ messages: withUrls, unreadCount });
 }
 
 export async function POST(req) {
   const auth = await requireAuth(req); if (auth.error) return auth.error;
-  const { text, athleteId: bodyAthleteId } = await req.json();
-  if (!text?.trim()) return Response.json({ error: 'Message vide' }, { status: 400 });
+  const { text, imagePath, athleteId: bodyAthleteId } = await req.json();
+  const hasImage = typeof imagePath === 'string' && imagePath.startsWith(`${auth.userId}/`) && !imagePath.includes('..');
+  if (!text?.trim() && !hasImage) return Response.json({ error: 'Message vide' }, { status: 400 });
 
   const t = await resolveThread(auth);
   if (t.error) return Response.json({ error: t.error }, { status: 403 });
@@ -73,7 +82,8 @@ export async function POST(req) {
     id: Date.now(),
     role: t.role,
     senderName: t.me.name,
-    text: text.trim(),
+    text: (text || '').trim(),
+    image: hasImage ? imagePath : null,
     date: new Date().toISOString(),
     read: false,
   };
@@ -82,12 +92,17 @@ export async function POST(req) {
   // Push notification au destinataire
   try {
     const { sendPushToUser } = await import('../push/send/route');
+    const { sendExpoPushToUser } = await import('../../lib/expoPush');
     if (t.role === 'coach') {
-      // Coach → athlète
-      await sendPushToUser(athleteId, `💬 ${t.me.name}`, text.trim().slice(0, 120), '/');
+      const snippet = ((text || '').trim() || '📷 Photo').slice(0, 120);
+      await Promise.all([
+        sendPushToUser(athleteId, `💬 ${t.me.name}`, snippet, '/'),
+        sendExpoPushToUser(athleteId, `💬 ${t.me.name}`, snippet, { type: 'chat' }),
+      ]);
     } else {
-      // Athlète → coach
-      await sendPushToUser(coachId, `💬 ${t.me.name}`, text.trim().slice(0, 120), '/coach');
+      const snippet = ((text || '').trim() || '📷 Photo').slice(0, 120);
+      await sendPushToUser(coachId, `💬 ${t.me.name}`, snippet, '/coach');
+      await sendExpoPushToUser(coachId, `💬 ${t.me.name}`, snippet, { type: 'chat', athleteId: t.athleteId });
     }
   } catch {}
 

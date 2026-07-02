@@ -1,4 +1,4 @@
-import { userDb } from '../db';
+import { db, userDb } from '../db';
 import { requireAuth } from '../auth/session';
 
 const DEFAULTS = {
@@ -18,7 +18,13 @@ export async function GET(req) {
     udb.get('userSettings').then(s => s || {}),
     udb.get('coachId'),
   ]);
-  return Response.json({ settings: { ...DEFAULTS, ...settings, coachId: coachId || null } });
+  // Nom du coach (pour l'en-tête de la messagerie athlète) — lookup seulement si rattaché.
+  let coachName = null;
+  if (coachId) {
+    const users = await db.get('auth:users') || [];
+    coachName = users.find(u => u.id === coachId)?.name || null;
+  }
+  return Response.json({ settings: { ...DEFAULTS, ...settings, coachId: coachId || null, coachName } });
 }
 
 export async function POST(req) {

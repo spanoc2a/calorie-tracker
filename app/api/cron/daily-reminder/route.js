@@ -1,5 +1,6 @@
 import { db, userDb } from '../../db';
 import { sendPushToUser } from '../../push/send/route';
+import { sendExpoPushToUser } from '../../../lib/expoPush';
 import { sendTrialEndingEmail } from '../../../lib/email';
 
 export const maxDuration = 60;
@@ -32,15 +33,26 @@ export async function GET(req) {
 
   let sent = 0, skipped = 0;
 
+  const title = '🥗 Tu n\'as pas encore loggé aujourd\'hui';
+  const bodyText = 'Quelques secondes suffisent pour rester dans le suivi.';
+
   for (const user of athletes) {
     try {
-      const sub = await userDb(user.id).get('pushSubscription');
-      if (!sub?.endpoint) { skipped++; continue; }
+      const udb = userDb(user.id);
+      const [sub, expoToken] = await Promise.all([
+        udb.get('pushSubscription'),
+        udb.get('expoPushToken'),
+      ]);
 
-      const entries = await userDb(user.id).get(`day:${today}`) || [];
+      // Aucun canal de notification : on saute.
+      if (!sub?.endpoint && !expoToken) { skipped++; continue; }
+
+      const entries = await udb.get(`day:${today}`) || [];
       if (entries.length > 0) { skipped++; continue; }
 
-      await sendPushToUser(user.id, '🥗 Tu n\'as pas encore loggé aujourd\'hui', 'Quelques secondes suffisent pour rester dans le suivi.', '/');
+      // Envoie sur les DEUX canaux disponibles (web + Expo mobile).
+      if (sub?.endpoint) await sendPushToUser(user.id, title, bodyText, '/');
+      if (expoToken) await sendExpoPushToUser(user.id, title, bodyText, { type: 'reminder' });
       sent++;
     } catch { skipped++; }
   }

@@ -1,6 +1,7 @@
 import { db, userDb } from '../../db';
 import { requireAuth } from '../../auth/session';
 import { sendPushToUser } from '../../push/send/route';
+import { sendExpoPushToUser } from '../../../lib/expoPush';
 
 // Coach valide un bilan sanguin d'un athlète et le lui envoie
 export async function POST(req) {
@@ -9,7 +10,9 @@ export async function POST(req) {
   const me = users.find(u => u.id === auth.userId);
   if (!me || me.role !== 'coach') return Response.json({ error: 'Accès refusé' }, { status: 403 });
 
-  const { athleteId, bloodTestId } = await req.json();
+  // `edits` optionnel : le coach corrige l'analyse IA (summary, weeklyFocus, markers…)
+  // avant de valider. Fusionné en gardant l'id du bilan.
+  const { athleteId, bloodTestId, edits } = await req.json();
   const athleteIds = await db.get(`coach:${auth.userId}:athletes`) || [];
   if (!athleteIds.includes(athleteId)) return Response.json({ error: 'Athlète non trouvé' }, { status: 404 });
 
@@ -18,11 +21,17 @@ export async function POST(req) {
   const idx = bloodTests.findIndex(b => b.id === bloodTestId);
   if (idx === -1) return Response.json({ error: 'Bilan non trouvé' }, { status: 404 });
 
-  bloodTests[idx] = { ...bloodTests[idx], pendingCoachValidation: false, coachValidated: true, validatedBy: me.name, validatedAt: new Date().toISOString() };
+  bloodTests[idx] = {
+    ...bloodTests[idx], ...(edits || {}), id: bloodTests[idx].id,
+    pendingCoachValidation: false, coachValidated: true, validatedBy: me.name, validatedAt: new Date().toISOString(),
+  };
   await udb.set('bloodTests', bloodTests);
 
   const athlete = users.find(u => u.id === athleteId);
-  sendPushToUser(athleteId, '🩸 Ton bilan est prêt', `${me.name} a analysé ton bilan sanguin`, '/').catch(() => {});
+  const btTitle = '🩸 Ton bilan est prêt';
+  const btBody = `${me.name} a analysé ton bilan sanguin`;
+  sendPushToUser(athleteId, btTitle, btBody, '/').catch(() => {});
+  sendExpoPushToUser(athleteId, btTitle, btBody, { type: 'blood_ready' });
 
   return Response.json({ ok: true });
 }

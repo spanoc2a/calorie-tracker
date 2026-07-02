@@ -1,3 +1,4 @@
+import crypto from 'crypto';
 import { db } from '../../db';
 import { sendSubscriptionEmail, sendCancellationEmail } from '../../../lib/email';
 
@@ -18,20 +19,45 @@ function planFromPaymentLink(url) {
   return PLAN_MAP[clean] || null;
 }
 
+// Vérification de la signature Stripe (HMAC-SHA256, fail-closed).
+function verifyStripeSignature(rawBody, sigHeader, secret) {
+  if (!sigHeader) return false;
+  const parts = sigHeader.split(',').reduce((acc, p) => {
+    const i = p.indexOf('=');
+    if (i === -1) return acc;
+    acc[p.slice(0, i)] = p.slice(i + 1);
+    return acc;
+  }, {});
+  const t = parts.t;
+  const v1 = parts.v1;
+  if (!t || !v1) return false;
+
+  // Rejette si timestamp > 5 min (anti-replay).
+  const timestamp = parseInt(t, 10);
+  if (!Number.isFinite(timestamp)) return false;
+  if (Math.abs(Date.now() / 1000 - timestamp) > 300) return false;
+
+  const expected = crypto.createHmac('sha256', secret).update(`${t}.${rawBody}`).digest('hex');
+  const expBuf = Buffer.from(expected, 'hex');
+  const sigBuf = Buffer.from(v1, 'hex');
+  if (expBuf.length !== sigBuf.length) return false;
+  return crypto.timingSafeEqual(expBuf, sigBuf);
+}
+
 export async function POST(req) {
   const sig = req.headers.get('stripe-signature');
   const secret = process.env.STRIPE_WEBHOOK_SECRET;
+  // Fail-closed : pas de secret configuré → on refuse.
+  if (!secret) return new Response('Webhook secret not configured', { status: 400 });
+
   const body = await req.text();
+
+  if (!verifyStripeSignature(body, sig, secret)) {
+    return new Response('Bad signature', { status: 400 });
+  }
 
   let event;
   try {
-    if (secret) {
-      const { createHmac } = await import('crypto');
-      const parts = sig.split(',').reduce((acc, p) => { const [k,v]=p.split('='); acc[k]=v; return acc; }, {});
-      const payload = `${parts.t}.${body}`;
-      const expected = createHmac('sha256', secret).update(payload).digest('hex');
-      if (expected !== parts.v1) return new Response('Bad signature', { status: 400 });
-    }
     event = JSON.parse(body);
   } catch (e) {
     return new Response('Webhook error', { status: 400 });
@@ -47,8 +73,11 @@ export async function POST(req) {
     if (!planInfo) return Response.json({ ok: true });
 
     const users = await db.get('auth:users') || [];
-    const idx = users.findIndex(u => u.email === email);
-    if (idx === -1) return Response.json({ ok: true });
+    const idx = users.findIndex(u => (u.email || '').toLowerCase().trim() === email);
+    if (idx === -1) {
+      console.warn('[STRIPE] checkout.session.completed: aucun user pour', email);
+      return Response.json({ ok: true });
+    }
 
     const expiresAt = planInfo.billing === 'annual'
       ? Date.now() + 365 * 24 * 3600 * 1000

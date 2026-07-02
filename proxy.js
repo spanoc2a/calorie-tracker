@@ -22,7 +22,7 @@ export function proxy(req) {
   const isPublicPage = publicPages.some(p => pathname.startsWith(p));
 
   if (!session) {
-    const publicApi = ['/api/auth/', '/api/strava/debug', '/api/coach/lookup', '/api/push/', '/api/og'];
+    const publicApi = ['/api/auth/', '/api/strava/callback', '/api/strava/debug', '/api/coach/lookup', '/api/push/', '/api/og'];
     const isPublicApi = publicApi.some(p => pathname.startsWith(p));
     if (pathname.startsWith('/api/') && !isPublicApi) {
       return NextResponse.json({ error: 'Non authentifié' }, { status: 401 });

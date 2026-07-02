@@ -5,6 +5,8 @@ import { checkBloodTestLimit, upgradeResponse } from '../../lib/planServer';
 export const maxDuration = 120;
 
 const ALLOWED_MIME = ['image/jpeg', 'image/png', 'image/gif', 'image/webp', 'application/pdf'];
+const MAX_FILE_BYTES = 10 * 1024 * 1024; // 10 Mo
+const MAX_FILES = 5;
 
 const LANG_NAMES = { fr: 'français', en: 'English', es: 'español', de: 'Deutsch', pt: 'português', it: 'italiano' };
 
@@ -14,7 +16,17 @@ function detectLang(req) {
   return ['fr','en','es','de','pt','it'].includes(l) ? l : 'fr';
 }
 
-function makeSystem(lang) {
+function detectUnitSystem(req) {
+  const h = req.headers.get('x-unit-system') || '';
+  return h === 'imperial' ? 'imperial' : 'metric';
+}
+
+function unitSystemInstr(unitSystem) {
+  if (unitSystem !== 'imperial') return '';
+  return '\nIMPORTANT: Display all weights in lbs (1 kg = 2.205 lbs), heights in feet/inches, and distances in miles in the report text. Do the conversions yourself.';
+}
+
+function makeSystem(lang, unitSystem = 'metric') {
   const langInstr = lang !== 'fr' ? `\nIMPORTANT: Write "summary", "cause", "tip", "synergy", "avoid", "supplements", "weeklyFocus", "nextCheckup", and all "reason" fields in ${LANG_NAMES[lang] || 'English'}.` : '';
   return `Tu es un médecin nutritionniste expert en micronutrition.
 Analyse le bilan de santé fourni (prise de sang, bilan hormonal, vitaminique, lipidique, NFS, ionogramme, bilan thyroïdien, etc.).
@@ -58,7 +70,7 @@ Règles :
 - recommendations : 6 à 10 items globaux actionnables
 - weeklyFocus : 1 phrase d'action concrète pour cette semaine
 - nextCheckup : recommandation de suivi temporelle
-- Sois précis sur les quantités, fréquences et synergies nutritionnelles${langInstr}`;
+- Sois précis sur les quantités, fréquences et synergies nutritionnelles${langInstr}${unitSystemInstr(unitSystem)}`;
 }
 
 function extractJSON(text) {
@@ -117,7 +129,8 @@ export async function POST(req) {
   const limit = await checkBloodTestLimit(auth.userId);
   if (!limit.allowed) return upgradeResponse('bloodtest');
   const lang = detectLang(req);
-  const SYSTEM = makeSystem(lang);
+  const unitSystem = detectUnitSystem(req);
+  const SYSTEM = makeSystem(lang, unitSystem);
   const udb = userDb(auth.userId);
   const formData = await req.formData();
   const files = formData.getAll('files');
@@ -127,10 +140,14 @@ export async function POST(req) {
 
   if (!files || files.length === 0)
     return Response.json({ error: 'Aucun fichier fourni' }, { status: 400 });
+  if (files.length > MAX_FILES)
+    return Response.json({ error: `Maximum ${MAX_FILES} fichiers` }, { status: 400 });
 
   for (const file of files) {
     if (!ALLOWED_MIME.includes(file.type))
       return Response.json({ error: `Format non supporté : ${file.name}` }, { status: 400 });
+    if (file.size > MAX_FILE_BYTES)
+      return Response.json({ error: `Fichier trop volumineux : ${file.name} (max 10 Mo)` }, { status: 400 });
   }
 
   const blocks = [];
@@ -193,6 +210,9 @@ export async function POST(req) {
     const athlete = users.find(u => u.id === auth.userId);
     import('../push/send/route').then(m =>
       m.sendPushToUser(coachId, '🩸 Nouveau bilan sanguin', `${athlete?.name || 'Un athlète'} a envoyé un bilan à analyser`, '/coach')
+    ).catch(() => {});
+    import('../../lib/expoPush').then(m =>
+      m.sendExpoPushToUser(coachId, '🩸 Nouveau bilan', `${athlete?.name || 'Un élève'} a envoyé un bilan à analyser`, { type: 'blood_coach', athleteId: auth.userId })
     ).catch(() => {});
   }
 

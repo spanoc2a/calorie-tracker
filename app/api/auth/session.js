@@ -19,13 +19,15 @@ export async function requireAuth(req) {
   const viewAs = cookieHeader.split(';').map(c => c.trim()).find(c => c.startsWith('viewAs='))?.slice(7);
   if (viewAs) {
     const athleteIds = await db.get(`coach:${session.userId}:athletes`) || [];
-    if (athleteIds.includes(viewAs)) return { userId: viewAs, isViewAs: true, coachId: session.userId };
+    if (athleteIds.includes(viewAs)) return { userId: viewAs, isViewAs: true, coachId: session.userId, email: session.email };
   }
 
-  return { userId: session.userId };
+  return { userId: session.userId, email: session.email, name: session.name };
 }
 
-export function sessionCookie(token, maxAge = 60 * 60 * 24 * 365 * 10) {
-  const secure = process.env.NODE_ENV === 'production' ? '; Secure' : '';
-  return `session=${token}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${maxAge}${secure}`;
+export function sessionCookie(token, maxAge = 90 * 24 * 3600) {
+  const isProd = process.env.NODE_ENV === 'production';
+  const secure = isProd ? '; Secure' : '';
+  const domain = isProd ? '; Domain=.nutrainer.io' : '';
+  return `session=${token}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${maxAge}${secure}${domain}`;
 }

@@ -1,5 +1,11 @@
 import { requireAuth } from '../auth/session';
+import { userDb } from '../db';
 import { checkSuggestionsLimit, incrementSuggestions, upgradeResponse } from '../../lib/planServer';
+import { summarizeStravaActivities, trainingLoadLabel } from '../../lib/healthContext';
+import { rateLimit } from '../../lib/ratelimit';
+
+// Le biohack génère beaucoup de tokens (~15s) → laisser le temps à la fonction.
+export const maxDuration = 60;
 
 const LANG_NAMES = { fr: 'français', en: 'English', es: 'español', de: 'Deutsch', pt: 'português', it: 'italiano' };
 
@@ -11,10 +17,28 @@ function detectLang(req) {
 
 export async function POST(req) {
   const auth = await requireAuth(req); if (auth.error) return auth.error;
+  const allowed = await rateLimit(`suggest:${auth.userId}`, 20, 3_600_000);
+  if (!allowed) return Response.json({ error: 'Trop de requêtes, réessaie dans un moment' }, { status: 429 });
+  // Élève rattaché à un coach : pas de génération de recettes IA.
+  if (await userDb(auth.userId).get('coachId')) return Response.json({ error: 'COACH_MANAGED', message: 'Ton coach gère tes recettes.' }, { status: 403 });
   const limit = await checkSuggestionsLimit(auth.userId);
   if (!limit.allowed) return upgradeResponse('suggestions');
   const lang = detectLang(req);
-  const { remainingKcal, remainingProtein, remainingCarbs, remainingFat, hour, ingredientLibrary, savedRecipes, type = 'maintenant', withWhey = true, bloodTest = null, healthHistory = '' } = await req.json();
+  const { remainingKcal, remainingProtein, remainingCarbs, remainingFat, hour, ingredientLibrary, savedRecipes, type = 'maintenant', withWhey = true, bloodTest = null, healthHistory = '', diets = [] } = await req.json();
+
+  // Régimes / allergènes choisis côté app (chips). Contrainte STRICTE sur la génération.
+  const DIET_LABELS = {
+    vege: 'végétarien (aucune viande ni poisson)', vegetarien: 'végétarien (aucune viande ni poisson)', vegetarian: 'végétarien (aucune viande ni poisson)',
+    vegan: 'végan (aucun produit animal : ni viande, poisson, œuf, lait, miel)', vegetalien: 'végan (aucun produit animal)',
+    keto: 'cétogène (très pauvre en glucides, riche en lipides)', cetogene: 'cétogène (très pauvre en glucides, riche en lipides)',
+    lowcarb: 'pauvre en glucides', 'low-carb': 'pauvre en glucides',
+    lactose: 'sans lactose (aucun produit laitier)', 'sans-lactose': 'sans lactose (aucun produit laitier)', 'sanslactose': 'sans lactose (aucun produit laitier)',
+    gluten: 'sans gluten (ni blé, orge, seigle, avoine non certifiée)', 'sans-gluten': 'sans gluten', 'sansgluten': 'sans gluten',
+  };
+  const dietList = Array.isArray(diets) ? diets.filter(Boolean) : [];
+  const dietInstruction = dietList.length
+    ? `\nCONTRAINTE ALIMENTAIRE STRICTE — chaque suggestion DOIT impérativement respecter : ${dietList.map(d => DIET_LABELS[String(d).toLowerCase()] || d).join(' ; ')}. N'utilise AUCUN ingrédient interdit par ces régimes. Cette contrainte est non négociable et prime sur la variété.`
+    : '';
 
   const meal = hour < 11 ? 'petit-déjeuner' : hour < 14 ? 'déjeuner' : hour < 17 ? 'collation' : 'dîner';
 
@@ -115,6 +139,48 @@ Format :
 {"suggestions":[{"name":"Shot Feu Immunitaire","target":"Immunité & anti-inflammation","timing":"Matin à jeun","steps":["Presser 1 citron entier","Râper 2cm de gingembre frais","Ajouter 1/2 cc curcuma + pincée poivre noir + pincée piment de cayenne","Mélanger, boire cul sec"],"ingredients":[{"name":"Citron","quantity":1,"unit":"unité"},{"name":"Gingembre frais","quantity":10,"unit":"g"},{"name":"Curcuma en poudre","quantity":2,"unit":"g"},{"name":"Poivre noir","quantity":0.5,"unit":"g"},{"name":"Piment de cayenne","quantity":0.5,"unit":"g"}],"kcal":25,"protein":1,"carbs":5,"fat":0}]}`;
     userMsg = `Profil athlète — ${macroSafe}\nPropose 3 protocoles biohacking distincts (shot, cocktail fonctionnel ou stack) adaptés à la récupération, la performance ou le sommeil.${bloodCtx}`;
   }
+
+  // Contexte récupération (Health Connect / Apple Santé) → recettes & biohacks "en conséquence"
+  try {
+    const hc = await userDb(auth.userId).get('healthConnectData');
+    if (hc) {
+      const r = [];
+      if (hc.avgSleep)  r.push(`sommeil ${hc.avgSleep}h/nuit`);
+      if (hc.sleepStages) {
+        const st = hc.sleepStages; const tot = (st.deep || 0) + (st.light || 0) + (st.rem || 0);
+        if (tot > 0) r.push(`sommeil profond ${Math.round(st.deep / tot * 100)}%`);
+      }
+      if (hc.hrv)       r.push(`HRV ${hc.hrv}ms`);
+      if (hc.restingHR) r.push(`FC repos ${hc.restingHR}bpm`);
+      if (hc.avgHR)     r.push(`FC moyenne ${hc.avgHR}bpm`);
+      if (hc.avgSteps)  r.push(`${hc.avgSteps} pas/j`);
+      if (r.length) {
+        userMsg += `\n\nÉtat de récupération RÉEL de l'utilisateur (objet connecté) : ${r.join(', ')}.\n` +
+          `Adapte les suggestions à CES données et n'invente jamais une valeur absente. ` +
+          `Récup faible (sommeil court < 6h / sommeil profond bas < 13% / FC repos élevée) → ` +
+          `privilégie aliments & protocoles anti-inflammatoires, magnésium, oméga-3, glucides de qualité, favorise la récupération ; ` +
+          `bonne récup (sommeil ≥ 7h, profond ≥ 15%, FC repos basse) → tu peux viser performance / énergie. Pour un biohack, choisis la cible ` +
+          `(récup / sommeil / anti-inflammation / énergie / focus) selon cet état.`;
+      }
+    }
+  } catch (e) {}
+
+  // Charge d'entraînement RÉELLE (Strava enrichi, 7j) → adapter recettes/biohacks à l'effort fourni
+  try {
+    const stravaCache = await userDb(auth.userId).get('stravaCache');
+    const cutoff = new Date(Date.now() - 7 * 86400000).toISOString().slice(0, 10);
+    const recent = (stravaCache?.activities || []).filter(a => (a.date || '') >= cutoff);
+    const s = summarizeStravaActivities(recent);
+    if (s) {
+      const parts = [`${s.count} séance(s)`, `${s.totalDurationMin} min`, `${s.totalKcal} kcal dépensées`];
+      if (s.sufferTotal != null) parts.push(`charge ${trainingLoadLabel(s.sufferTotal)} (suffer ${s.sufferTotal})`);
+      userMsg += `\n\nActivité sportive RÉELLE 7j (Strava) : ${s.types.join(', ') || '—'} — ${parts.join(', ')}.\n` +
+        `Adapte les suggestions à cette dépense et à cette charge : charge/dépense élevée → favorise la récupération (anti-inflammatoires, glucides de qualité, protéines, hydratation/électrolytes) et un apport suffisant ; charge faible → reste sur l'objectif. N'invente AUCUNE donnée absente.`;
+    }
+  } catch (e) {}
+
+  // Régimes choisis : on l'ajoute au message utilisateur pour TOUS les types.
+  if (dietInstruction) userMsg += `\n${dietInstruction}`;
 
   if (lang !== 'fr') {
     system += `\nIMPORTANT: Write all meal names, step descriptions, ingredient names, and any text fields in ${LANG_NAMES[lang] || 'English'}.`;

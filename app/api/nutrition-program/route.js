@@ -1,6 +1,9 @@
 import { userDb } from '../db';
 import { requireAuth } from '../auth/session';
 import { checkProgramLimit, incrementProgramUsage, upgradeResponse } from '../../lib/planServer';
+import { sendExpoPushToUser } from '../../lib/expoPush';
+import { getHealthContext, buildStravaContext } from '../../lib/healthContext';
+import { rateLimit } from '../../lib/ratelimit';
 
 export const maxDuration = 300;
 
@@ -10,6 +13,16 @@ function detectLang(req) {
   const h = req.headers.get('accept-language') || '';
   const l = h.split(',')[0].split('-')[0].toLowerCase();
   return ['fr','en','es','de','pt','it'].includes(l) ? l : 'fr';
+}
+
+function detectUnitSystem(req) {
+  const h = req.headers.get('x-unit-system') || '';
+  return h === 'imperial' ? 'imperial' : 'metric';
+}
+
+function unitSystemInstr(unitSystem) {
+  if (unitSystem !== 'imperial') return '';
+  return '\nIMPORTANT: Display all weights in lbs (1 kg = 2.205 lbs), heights in feet/inches, and distances in miles in the report text. Do the conversions yourself.';
 }
 
 function calcAge(birthdate) {
@@ -34,18 +47,29 @@ function extractJSON(text) {
 
 export async function GET(req) {
   const auth = await requireAuth(req); if (auth.error) return auth.error;
-  const program = await userDb(auth.userId).get('nutritionProgram') || null;
-  return Response.json({ program });
+  const [program, access] = await Promise.all([
+    userDb(auth.userId).get('nutritionProgram'),
+    checkProgramLimit(auth.userId),
+  ]);
+  const remaining = (access.count != null && access.limit != null && access.limit !== Infinity)
+    ? access.limit - access.count
+    : null;
+  return Response.json({ program: program || null, ...(remaining != null ? { remaining } : {}) });
 }
 
 export async function POST(req) {
   try {
   const auth = await requireAuth(req); if (auth.error) return auth.error;
+  const allowed = await rateLimit(`nutrition-program:${auth.userId}`, 20, 3_600_000);
+  if (!allowed) return Response.json({ error: 'Trop de requêtes, réessaie dans un moment' }, { status: 429 });
+  // Élève rattaché à un coach : la génération est gérée par le coach (anti court-circuit).
+  if (await userDb(auth.userId).get('coachId')) return Response.json({ error: 'COACH_MANAGED', message: 'Ton coach gère ton programme nutritionnel.' }, { status: 403 });
   const access = await checkProgramLimit(auth.userId);
   if (!access.allowed) return access.limitLabel
     ? Response.json({ error: 'PROGRAM_LIMIT', limitLabel: access.limitLabel }, { status: 429 })
     : upgradeResponse('program');
   const lang = detectLang(req);
+  const unitSystem = detectUnitSystem(req);
   const udb = userDb(auth.userId);
   const { mainMeals = 3, snacks = 1, preferences = '', avoidFoods = '' } = await req.json();
 
@@ -79,8 +103,9 @@ Mode : ${mode || 'maintien'}${healthHistory ? `\nHistorique de santé IMPORTANT 
     ? `\nBilan sanguin : ${blood.summary || '—'}\nMarqueurs anormaux : ${(blood.markers || []).filter(m => m.status !== 'ok').map(m => `${m.name} ${m.value}${m.unit || ''} (${m.status})`).join(', ') || 'aucun'}${blood.weeklyFocus ? `\nFocus correctif : ${blood.weeklyFocus}` : ''}${(blood.markerRecos || []).length > 0 ? `\nAliments correcteurs à intégrer obligatoirement dans le programme :\n${blood.markerRecos.map(r => `- ${r.marker} : ${(r.foods||[]).map(f=>`${f.name} (${f.quantity}, ${f.frequency})`).join(', ')}${r.synergy ? ` — Synergie: ${r.synergy}` : ''}${r.avoid ? ` — Éviter avec: ${r.avoid}` : ''}`).join('\n')}` : ''}`
     : '';
 
-  const stravaCtx = stravaCache?.activities?.length > 0
-    ? `\nActivité sportive (7j) : ${stravaCache.activities.length} séances — ${[...new Set(stravaCache.activities.map(a => a.typeLabel))].join(', ')}`
+  const stravaCtx = buildStravaContext(stravaCache, { sinceDate: dates[dates.length - 1], periodLabel: '14j' });
+  const stravaInstr = stravaCtx
+    ? `\nIMPORTANT — adapte le programme à la dépense et à la charge sportives RÉELLES ci-dessus : intègre la dépense énergétique sport (caloriesAdjusted) dans la répartition calorique (jours actifs = plus de glucides/calories), et tiens compte de la charge (suffer_score) : charge élevée → privilégie récupération, glucides de qualité et protéines ; charge faible → marge. N'invente AUCUNE donnée absente.`
     : '';
 
   const prefsCtx = [
@@ -122,11 +147,12 @@ Format exact :
 - Adapte les quantités pour atteindre l'objectif calorique journalier réparti intelligemment
 - Si bilan sanguin anormal : intègre des aliments correcteurs
 - Varie les repas d'un jour à l'autre, évite les répétitions exactes
-- Cuisine méditerranéenne, ingrédients simples et accessibles${langInstr}`;
+- Cuisine méditerranéenne, ingrédients simples et accessibles${langInstr}${unitSystemInstr(unitSystem)}`;
 
   const mealsPerDay = MEAL_TYPES.length;
 
-  const userMsg = `${profileCtx}${foodCtx}${bloodCtx}${stravaCtx}${prefsCtx ? '\n' + prefsCtx : ''}`;
+  const healthCtx = await getHealthContext(auth.userId);
+  const userMsg = `${profileCtx}${foodCtx}${bloodCtx}${stravaCtx}${stravaInstr}${prefsCtx ? '\n' + prefsCtx : ''}${healthCtx}`;
 
   const apiRes = await fetch('https://api.anthropic.com/v1/messages', {
     method: 'POST',
@@ -147,8 +173,10 @@ Format exact :
     udb.set('nutritionProgram', program),
     incrementProgramUsage(auth.userId, access.usageKey),
   ]);
+  sendExpoPushToUser(auth.userId, '⚡ Programme nutritionnel généré !', 'Ton plan alimentaire est prêt.', { type: 'program_ready', programType: 'nutrition' });
 
-  return Response.json({ program, usage: { count: (access.count || 0) + 1, limit: access.limit } });
+  const remaining = access.limit != null && access.limit !== Infinity ? access.limit - (access.count || 0) - 1 : null;
+  return Response.json({ program, ...(remaining != null ? { remaining } : {}) });
   } catch(e) {
     console.error('nutrition-program error:', e);
     return Response.json({ error: e.message || 'Erreur serveur' }, { status: 500 });

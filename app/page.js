@@ -887,7 +887,9 @@ export default function App() {
   const [stravaConnected, setStravaConnected] = useState(false);
   const [stravaAthlete,   setStravaAthlete]   = useState(null);
   const [stravaActivities,setStravaActivities]= useState([]);
+  const [stravaActiveDates,setStravaActiveDates]= useState([]);
   const [stravaDebug,     setStravaDebug]     = useState(null);
+  const [healthActivities,setHealthActivities]= useState([]);
   const [gfitConnected,   setGfitConnected]   = useState(false);
   const [gfitData,        setGfitData]        = useState(null);
   const [currentMeal,     setCurrentMeal]     = useState('Petit-déjeuner');
@@ -905,6 +907,20 @@ export default function App() {
   const [coachCode,       setCoachCode]       = useState('');
   const [coachLinked,     setCoachLinked]     = useState(null);
   const [coachLinkMsg,    setCoachLinkMsg]    = useState('');
+  // Bilan initial
+  const [intake,          setIntake]          = useState(null);
+  const [intakeOpen,      setIntakeOpen]      = useState(false);
+  const [intakeForm,      setIntakeForm]      = useState({ allergies:'', goals:'', medicalHistory:'', injuries:'', lifestyle:'', motivation:'' });
+  const [intakeSaving,    setIntakeSaving]    = useState(false);
+  // Mensurations
+  const [measurements,    setMeasurements]    = useState([]);
+  const [measureOpen,     setMeasureOpen]     = useState(false);
+  const [measureForm,     setMeasureForm]     = useState({ date: new Date().toISOString().slice(0,10), weight:'', waist:'', chest:'', hips:'', bodyFat:'', muscleMass:'', note:'' });
+  // Check-in hebdomadaire
+  const [pendingCheckin,  setPendingCheckin]  = useState(null);
+  const [checkinOpen,     setCheckinOpen]     = useState(false);
+  const [checkinForm,     setCheckinForm]     = useState({ mood:3, energy:3, sleep:7, weight:'', notes:'' });
+  const [checkinSaving,   setCheckinSaving]   = useState(false);
   const [selfNutritionAllowed, setSelfNutritionAllowed] = useState(true);
   const [selfMuscuAllowed,     setSelfMuscuAllowed]     = useState(true);
   const [coachNotifs,     setCoachNotifs]     = useState([]);
@@ -1030,6 +1046,8 @@ export default function App() {
         else if (!d.user.isViewAs) {
           fetch('/api/coach/athlete').then(r=>r.json()).then(d=>setCoachNotifs((d.notifications||[]).filter(n=>!n.read)));
           fetch('/api/athlete/program').then(r=>r.json()).then(d=>{ setCoachPrograms(d.programs||[]); setCoachMuscuPrograms(d.muscuPrograms||[]); });
+          fetch('/api/athlete/intake').then(r=>r.json()).then(d=>setIntake(d.intake||null));
+          fetch('/api/checkin').then(r=>r.json()).then(d=>setPendingCheckin(d.pendingWeek||null));
           fetch('/api/chat').then(r=>r.json()).then(d=>{ setChatMessages(d.messages||[]); setChatUnread(d.unreadCount||0); });
           fetch('/api/nutrition-program').then(r=>r.json()).then(d=>{ if (d.program) setNutritionProgram(d.program); });
           fetch('/api/reports').then(r=>r.json()).then(d=>{
@@ -1233,6 +1251,7 @@ export default function App() {
       else if (n===30) setMonthData(withBurned);
       else setLongData(withBurned);
     });
+    fetch('/api/measurements').then(r=>r.json()).then(d=>setMeasurements(d.measurements||[]));
   }, [tab, statsRange]);
 
   // Poids — chargé au montage pour la saisie rapide dans le journal
@@ -1249,10 +1268,18 @@ export default function App() {
   function fetchStrava(dateKey) {
     fetch(`/api/strava/activities?date=${dateKey}`)
       .then(r=>{ if(r.status===402){ setUpgradeModal({ feature:'strava' }); return null; } return r.json(); })
-      .then(d=>{ if(!d) return; setStravaDebug(d); setStravaConnected(!!d.connected); if(d.athlete) setStravaAthlete(d.athlete); setStravaActivities(d.activities||[]); })
+      .then(d=>{ if(!d) return; setStravaDebug(d); setStravaConnected(!!d.connected); if(d.athlete) setStravaAthlete(d.athlete); setStravaActivities(d.activities||[]); if(d.activeDates) setStravaActiveDates(d.activeDates); })
       .catch(e=>setStravaDebug({fetchError: String(e)}));
   }
   useEffect(() => { fetchStrava(key); }, [key]);
+
+  // Health Connect (sync depuis l'app native)
+  useEffect(() => {
+    fetch(`/api/health/activities?date=${key}`)
+      .then(r=>r.json())
+      .then(d=>setHealthActivities(d.activities||[]))
+      .catch(()=>{});
+  }, [key]);
 
   // Google Fit
   function fetchGoogleFit(dateKey) {
@@ -1265,8 +1292,20 @@ export default function App() {
 
   useEffect(() => {
     const p = new URLSearchParams(window.location.search);
+    if (p.get('strava') === 'error') {
+      const reason = p.get('reason') || 'inconnu';
+      alert(`Erreur connexion Strava : ${reason}`);
+    }
     if (p.get('strava') || p.get('googlefit')) window.history.replaceState({}, '', '/');
   }, []);
+
+  useEffect(() => {
+    const handler = (e) => {
+      if (e.origin === window.location.origin && e.data?.stravaConnected) fetchStrava(key);
+    };
+    window.addEventListener('message', handler);
+    return () => window.removeEventListener('message', handler);
+  }, [key]);
 
   async function logWater(n) {
     const count = Math.max(0, Math.min(8, n));
@@ -1389,7 +1428,8 @@ export default function App() {
   }
 
   const totals = entries.reduce((acc,e) => ({ kcal:acc.kcal+e.kcal, protein:acc.protein+e.protein, carbs:acc.carbs+e.carbs, fat:acc.fat+e.fat }), { kcal:0, protein:0, carbs:0, fat:0 });
-  const sportBurned   = stravaActivities.reduce((a,act)=>a+(act.caloriesAdjusted||act.calories||0),0);
+  const sportBurned   = stravaActivities.reduce((a,act)=>a+(act.caloriesAdjusted||act.calories||0),0)
+                      + healthActivities.reduce((a,act)=>a+(act.calories||0),0);
   const effectiveGoal = goal + sportBurned;
   const pct       = totals.kcal / effectiveGoal;
   const ringColor = totals.kcal > effectiveGoal        ? "#c87070"
@@ -1822,6 +1862,87 @@ export default function App() {
           </div>
         ))}
 
+        {/* ─── CHECK-IN HEBDOMADAIRE banner ─── */}
+        {coachLinked && pendingCheckin && !checkinOpen && (
+          <div style={{ background:"#0d0d0d", border:"1px solid #c8b890", borderRadius:12, padding:"12px 14px", marginBottom:12, display:"flex", alignItems:"center", justifyContent:"space-between", gap:10 }}>
+            <div>
+              <div style={{ fontSize:"0.65rem", color:"#c8b890", fontFamily:"'DM Mono',monospace", letterSpacing:1 }}>✅ Check-in de la semaine</div>
+              <div style={{ fontSize:"0.57rem", color:"#6b6b5a", marginTop:3 }}>Ton coach attend ton retour hebdomadaire</div>
+            </div>
+            <button onClick={()=>setCheckinOpen(true)}
+              style={{ background:"#1e1a12", border:"1px solid #c8b890", borderRadius:8, padding:"7px 12px", color:"#c8b890", fontFamily:"'DM Mono',monospace", fontSize:"0.6rem", cursor:"pointer", whiteSpace:"nowrap" }}>
+              Remplir →
+            </button>
+          </div>
+        )}
+
+        {/* ─── CHECK-IN form modal ─── */}
+        {checkinOpen && (
+          <div style={{ position:"fixed", inset:0, background:"rgba(0,0,0,0.85)", zIndex:200, overflowY:"auto", display:"flex", alignItems:"flex-start", justifyContent:"center", padding:"24px 16px" }} onClick={()=>setCheckinOpen(false)}>
+            <div style={{ background:"#111", border:"1px solid #2a2a2a", borderRadius:16, padding:"20px 18px", maxWidth:480, width:"100%" }} onClick={e=>e.stopPropagation()}>
+              <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:16 }}>
+                <div style={{ fontFamily:"'Playfair Display',serif", fontSize:"1rem", color:"#f0e6c8" }}>
+                  Check-in semaine du {pendingCheckin ? new Date(pendingCheckin).toLocaleDateString('fr-FR',{day:'numeric',month:'long'}) : ''}
+                </div>
+                <button onClick={()=>setCheckinOpen(false)} style={{ background:"transparent", border:"none", color:"#5a5a4a", fontSize:"1.2rem", cursor:"pointer" }}>✕</button>
+              </div>
+
+              <div style={{ marginBottom:14 }}>
+                <div style={{ fontSize:"0.6rem", color:"#6b6b5a", marginBottom:6, fontFamily:"'DM Mono',monospace", letterSpacing:1 }}>HUMEUR</div>
+                <div style={{ display:"flex", gap:6 }}>
+                  {[1,2,3,4,5].map(v => (
+                    <button key={v} onClick={()=>setCheckinForm(f=>({...f,mood:v}))}
+                      style={{ flex:1, padding:"8px 4px", background: checkinForm.mood>=v?"#1e1a12":"#0d0d0d", border:`1px solid ${checkinForm.mood>=v?"#c8b890":"#2a2a2a"}`, borderRadius:8, color: checkinForm.mood>=v?"#c8b890":"#3a3a2a", fontSize:"0.9rem", cursor:"pointer" }}>
+                      ★
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <div style={{ marginBottom:14 }}>
+                <div style={{ fontSize:"0.6rem", color:"#6b6b5a", marginBottom:6, fontFamily:"'DM Mono',monospace", letterSpacing:1 }}>ÉNERGIE</div>
+                <div style={{ display:"flex", gap:6 }}>
+                  {[1,2,3,4,5].map(v => (
+                    <button key={v} onClick={()=>setCheckinForm(f=>({...f,energy:v}))}
+                      style={{ flex:1, padding:"8px 4px", background: checkinForm.energy>=v?"#1e1a12":"#0d0d0d", border:`1px solid ${checkinForm.energy>=v?"#c8b890":"#2a2a2a"}`, borderRadius:8, color: checkinForm.energy>=v?"#c8b890":"#3a3a2a", fontSize:"0.9rem", cursor:"pointer" }}>
+                      ★
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <div style={{ marginBottom:14 }}>
+                <div style={{ fontSize:"0.6rem", color:"#6b6b5a", marginBottom:6, fontFamily:"'DM Mono',monospace", letterSpacing:1 }}>SOMMEIL (heures)</div>
+                <input type="number" min="0" max="24" step="0.5" value={checkinForm.sleep} onChange={e=>setCheckinForm(f=>({...f,sleep:e.target.value}))}
+                  style={{ width:"100%", background:"#0d0d0d", border:"1px solid #2a2a2a", borderRadius:8, padding:"8px 12px", color:"#c8b890", fontFamily:"'DM Mono',monospace", fontSize:"0.8rem", outline:"none" }}/>
+              </div>
+
+              <div style={{ marginBottom:14 }}>
+                <div style={{ fontSize:"0.6rem", color:"#6b6b5a", marginBottom:6, fontFamily:"'DM Mono',monospace", letterSpacing:1 }}>POIDS (kg, optionnel)</div>
+                <input type="number" min="30" max="300" step="0.1" placeholder="—" value={checkinForm.weight} onChange={e=>setCheckinForm(f=>({...f,weight:e.target.value}))}
+                  style={{ width:"100%", background:"#0d0d0d", border:"1px solid #2a2a2a", borderRadius:8, padding:"8px 12px", color:"#c8b890", fontFamily:"'DM Mono',monospace", fontSize:"0.8rem", outline:"none" }}/>
+              </div>
+
+              <div style={{ marginBottom:18 }}>
+                <div style={{ fontSize:"0.6rem", color:"#6b6b5a", marginBottom:6, fontFamily:"'DM Mono',monospace", letterSpacing:1 }}>NOTES LIBRES</div>
+                <textarea value={checkinForm.notes} onChange={e=>setCheckinForm(f=>({...f,notes:e.target.value}))} placeholder="Comment s'est passée ta semaine ?" rows={3}
+                  style={{ width:"100%", background:"#0d0d0d", border:"1px solid #2a2a2a", borderRadius:8, padding:"8px 12px", color:"#e8e0d0", fontFamily:"'DM Mono',monospace", fontSize:"0.72rem", outline:"none", resize:"none" }}/>
+              </div>
+
+              <button className="btn" style={{ width:"100%", fontSize:"0.72rem" }} disabled={checkinSaving}
+                onClick={async()=>{
+                  setCheckinSaving(true);
+                  await fetch('/api/checkin',{ method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ weekDate: pendingCheckin, ...checkinForm }) }).catch(()=>{});
+                  setCheckinSaving(false);
+                  setPendingCheckin(null);
+                  setCheckinOpen(false);
+                }}>
+                {checkinSaving ? '…' : 'Envoyer mon check-in'}
+              </button>
+            </div>
+          </div>
+        )}
+
         {/* ─── JOURNAL ─── */}
         {tab==="journal" && (<>
           {notifPermission === 'default' && (
@@ -2030,7 +2151,8 @@ export default function App() {
               })}
             </>);
           })()}
-          {stravaConnected && stravaActivities.length > 0 && (() => {
+          {stravaConnected && (() => {
+            if (stravaActivities.length === 0) return null;
             const totalBurned = stravaActivities.reduce((a,act)=>a+(act.calories||0),0);
             return (
               <div className="strava-card" style={{ marginTop:12 }}>
@@ -2057,6 +2179,27 @@ export default function App() {
               </div>
             );
           })()}
+          {healthActivities.length > 0 && (
+            <div style={{ background:"#0a1a0f", border:"1px solid #2a7a4a", borderRadius:12, padding:"12px 14px", marginTop:12 }}>
+              <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:8 }}>
+                <span style={{ fontSize:"0.58rem", color:"#4caf78", letterSpacing:2, textTransform:"uppercase" }}>❤️ Health Connect</span>
+                <span style={{ fontSize:"0.75rem", color:"#4caf78", fontFamily:"'Playfair Display',serif" }}>−{healthActivities.reduce((a,x)=>a+(x.calories||0),0)} kcal</span>
+              </div>
+              {healthActivities.map(a => (
+                <div key={a.id} style={{ display:"flex", justifyContent:"space-between", alignItems:"center", padding:"6px 0", borderBottom:"1px solid #1a2a1a" }}>
+                  <div>
+                    <div style={{ fontSize:"0.72rem", color:"#e8e0d0" }}>{a.label||a.name}</div>
+                    <div style={{ fontSize:"0.6rem", color:"#5a5a4a", marginTop:2 }}>
+                      {Math.floor(a.duration/60)} min
+                      {a.distance > 0 ? ` · ${(a.distance/1000).toFixed(1)} km` : ""}
+                      {a.avgHr ? ` · ♥ ${a.avgHr} bpm` : ""}
+                    </div>
+                  </div>
+                  <div style={{ fontSize:"0.72rem", color:"#4caf78", fontFamily:"'Playfair Display',serif" }}>{a.calories > 0 ? `${a.calories} kcal` : "—"}</div>
+                </div>
+              ))}
+            </div>
+          )}
           {gfitConnected && gfitData && (gfitData.steps > 0 || gfitData.activeMinutes > 0) && (
             <div style={{ background:"#0d1a0d", border:"1px solid #4caf5040", borderRadius:12, padding:"12px 14px", marginTop:12 }}>
               <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:8 }}>
@@ -2084,7 +2227,7 @@ export default function App() {
           <div className="subtabs">
             <button className={`subtab ${recetteTab==="recettes"?"active":""}`} onClick={()=>setRecetteTab("recettes")}>{t('app.subtab_recipes')}</button>
             <button className={`subtab ${recetteTab==="ingredients"?"active":""}`} onClick={()=>setRecetteTab("ingredients")}>{t('app.subtab_ingredients')}</button>
-            <button className={`subtab ${recetteTab==="creation"?"active":""}`} onClick={()=>{ setRecetteTab("creation"); setSuggestions([]); }}>{t('app.subtab_create')}</button>
+            {!coachLinked && <button className={`subtab ${recetteTab==="creation"?"active":""}`} onClick={()=>{ setRecetteTab("creation"); setSuggestions([]); }}>{t('app.subtab_create')}</button>}
           </div>
           {recetteTab==="recettes" && (<>
             <div className="section-label">{t('app.my_recipes')} — {recipes.length}</div>
@@ -2093,10 +2236,14 @@ export default function App() {
                 <div style={{ fontSize:"1.6rem", marginBottom:10 }}>🍲</div>
                 <div style={{ fontSize:"0.72rem", color:"#c8b890", marginBottom:6 }}>{t('app.no_recipes')}</div>
                 <div style={{ fontSize:"0.6rem", color:"#4a4a3a", marginBottom:20, lineHeight:1.7 }}>{t('app.no_recipes_sub').split('\n').map((l,i)=><span key={i}>{l}{i===0&&<br/>}</span>)}</div>
+                {coachLinked ? (
+                  <div style={{ fontSize:"0.6rem", color:"#5a5a4a" }}>Ton coach gère tes recettes et tes programmes.</div>
+                ) : (
                 <div style={{ display:"flex", gap:8, justifyContent:"center" }}>
                   <button className="btn secondary" style={{ fontSize:"0.65rem" }} onClick={()=>setRecetteTab("creation")}>{t('app.gen_ai')}</button>
                   <button className="btn secondary" style={{ fontSize:"0.65rem" }} onClick={()=>setRecetteTab("creation")}>{t('app.create_manual')}</button>
                 </div>
+                )}
               </div>
             )}
             {CATEGORIES.map(cat => {
@@ -2123,7 +2270,7 @@ export default function App() {
               onAddToJournal={(ing,qty)=>addIngredientToDay(ing,qty)} />
           )}
 
-          {recetteTab==="creation" && (() => {
+          {recetteTab==="creation" && !coachLinked && (() => {
             const stravaBurned = stravaActivities.reduce((a,act)=>a+(act.caloriesAdjusted||act.calories||0),0);
             const remKcal    = goal + stravaBurned - totals.kcal;
             const remProtein = proteinGoal - totals.protein;
@@ -2432,6 +2579,109 @@ export default function App() {
             </button>
           ))}
 
+          {/* ─── Mensurations ─── */}
+          <div style={{ background:"#1a1a1a", border:"1px solid #2a2a2a", borderRadius:12, padding:"14px", marginBottom:14 }}>
+            <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom: measureOpen ? 14 : 0 }}>
+              <div style={{ fontFamily:"'DM Mono',monospace", fontSize:"0.65rem", color:"#c8b890", letterSpacing:1 }}>📏 Mensurations</div>
+              <button onClick={()=>setMeasureOpen(o=>!o)}
+                style={{ background:"#1e1a12", border:"1px solid #c8b890", borderRadius:8, width:28, height:28, color:"#c8b890", fontFamily:"'DM Mono',monospace", fontSize:"1rem", cursor:"pointer", display:"flex", alignItems:"center", justifyContent:"center" }}>
+                {measureOpen ? '✕' : '+'}
+              </button>
+            </div>
+
+            {measureOpen && (
+              <div style={{ marginBottom:14 }}>
+                <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:8, marginBottom:8 }}>
+                  <div>
+                    <div style={{ fontSize:"0.55rem", color:"#6b6b5a", marginBottom:3, fontFamily:"'DM Mono',monospace", letterSpacing:1 }}>DATE</div>
+                    <input type="date" value={measureForm.date} onChange={e=>setMeasureForm(f=>({...f,date:e.target.value}))}
+                      style={{ width:"100%", background:"#0d0d0d", border:"1px solid #2a2a2a", borderRadius:8, padding:"7px 10px", color:"#c8b890", fontFamily:"'DM Mono',monospace", fontSize:"0.72rem", outline:"none" }}/>
+                  </div>
+                  <div>
+                    <div style={{ fontSize:"0.55rem", color:"#6b6b5a", marginBottom:3, fontFamily:"'DM Mono',monospace", letterSpacing:1 }}>POIDS (kg)</div>
+                    <input type="number" step="0.1" placeholder="—" value={measureForm.weight} onChange={e=>setMeasureForm(f=>({...f,weight:e.target.value}))}
+                      style={{ width:"100%", background:"#0d0d0d", border:"1px solid #2a2a2a", borderRadius:8, padding:"7px 10px", color:"#c8b890", fontFamily:"'DM Mono',monospace", fontSize:"0.72rem", outline:"none" }}/>
+                  </div>
+                  <div>
+                    <div style={{ fontSize:"0.55rem", color:"#6b6b5a", marginBottom:3, fontFamily:"'DM Mono',monospace", letterSpacing:1 }}>TOUR DE TAILLE (cm)</div>
+                    <input type="number" step="0.5" placeholder="—" value={measureForm.waist} onChange={e=>setMeasureForm(f=>({...f,waist:e.target.value}))}
+                      style={{ width:"100%", background:"#0d0d0d", border:"1px solid #2a2a2a", borderRadius:8, padding:"7px 10px", color:"#c8b890", fontFamily:"'DM Mono',monospace", fontSize:"0.72rem", outline:"none" }}/>
+                  </div>
+                  <div>
+                    <div style={{ fontSize:"0.55rem", color:"#6b6b5a", marginBottom:3, fontFamily:"'DM Mono',monospace", letterSpacing:1 }}>POITRINE (cm)</div>
+                    <input type="number" step="0.5" placeholder="—" value={measureForm.chest} onChange={e=>setMeasureForm(f=>({...f,chest:e.target.value}))}
+                      style={{ width:"100%", background:"#0d0d0d", border:"1px solid #2a2a2a", borderRadius:8, padding:"7px 10px", color:"#c8b890", fontFamily:"'DM Mono',monospace", fontSize:"0.72rem", outline:"none" }}/>
+                  </div>
+                  <div>
+                    <div style={{ fontSize:"0.55rem", color:"#6b6b5a", marginBottom:3, fontFamily:"'DM Mono',monospace", letterSpacing:1 }}>HANCHES (cm)</div>
+                    <input type="number" step="0.5" placeholder="—" value={measureForm.hips} onChange={e=>setMeasureForm(f=>({...f,hips:e.target.value}))}
+                      style={{ width:"100%", background:"#0d0d0d", border:"1px solid #2a2a2a", borderRadius:8, padding:"7px 10px", color:"#c8b890", fontFamily:"'DM Mono',monospace", fontSize:"0.72rem", outline:"none" }}/>
+                  </div>
+                  <div>
+                    <div style={{ fontSize:"0.55rem", color:"#6b6b5a", marginBottom:3, fontFamily:"'DM Mono',monospace", letterSpacing:1 }}>% GRAISSE</div>
+                    <input type="number" step="0.1" placeholder="—" value={measureForm.bodyFat} onChange={e=>setMeasureForm(f=>({...f,bodyFat:e.target.value}))}
+                      style={{ width:"100%", background:"#0d0d0d", border:"1px solid #2a2a2a", borderRadius:8, padding:"7px 10px", color:"#c8b890", fontFamily:"'DM Mono',monospace", fontSize:"0.72rem", outline:"none" }}/>
+                  </div>
+                  <div>
+                    <div style={{ fontSize:"0.55rem", color:"#6b6b5a", marginBottom:3, fontFamily:"'DM Mono',monospace", letterSpacing:1 }}>MASSE MUSCULAIRE (kg)</div>
+                    <input type="number" step="0.1" placeholder="—" value={measureForm.muscleMass} onChange={e=>setMeasureForm(f=>({...f,muscleMass:e.target.value}))}
+                      style={{ width:"100%", background:"#0d0d0d", border:"1px solid #2a2a2a", borderRadius:8, padding:"7px 10px", color:"#c8b890", fontFamily:"'DM Mono',monospace", fontSize:"0.72rem", outline:"none" }}/>
+                  </div>
+                  <div>
+                    <div style={{ fontSize:"0.55rem", color:"#6b6b5a", marginBottom:3, fontFamily:"'DM Mono',monospace", letterSpacing:1 }}>NOTE</div>
+                    <input type="text" placeholder="—" value={measureForm.note} onChange={e=>setMeasureForm(f=>({...f,note:e.target.value}))}
+                      style={{ width:"100%", background:"#0d0d0d", border:"1px solid #2a2a2a", borderRadius:8, padding:"7px 10px", color:"#c8b890", fontFamily:"'DM Mono',monospace", fontSize:"0.72rem", outline:"none" }}/>
+                  </div>
+                </div>
+                <button className="btn" style={{ width:"100%", fontSize:"0.7rem" }}
+                  onClick={async()=>{
+                    const res = await fetch('/api/measurements',{ method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(measureForm) });
+                    const d = await res.json();
+                    setMeasurements(prev=>[d.measurement, ...prev].slice(0,50));
+                    setMeasureForm({ date: new Date().toISOString().slice(0,10), weight:'', waist:'', chest:'', hips:'', bodyFat:'', muscleMass:'', note:'' });
+                    setMeasureOpen(false);
+                  }}>
+                  Enregistrer
+                </button>
+              </div>
+            )}
+
+            {measurements.length > 0 && (
+              <div style={{ overflowX:"auto", marginTop: measureOpen ? 0 : 8 }}>
+                <table style={{ width:"100%", borderCollapse:"collapse", fontFamily:"'DM Mono',monospace", fontSize:"0.6rem" }}>
+                  <thead>
+                    <tr style={{ color:"#4a4a3a", borderBottom:"1px solid #2a2a2a" }}>
+                      <th style={{ textAlign:"left", padding:"4px 6px", fontWeight:400 }}>Date</th>
+                      <th style={{ textAlign:"right", padding:"4px 6px", fontWeight:400 }}>Poids</th>
+                      <th style={{ textAlign:"right", padding:"4px 6px", fontWeight:400 }}>Taille</th>
+                      <th style={{ textAlign:"right", padding:"4px 6px", fontWeight:400 }}>Hanches</th>
+                      <th style={{ textAlign:"right", padding:"4px 6px", fontWeight:400 }}>% gras</th>
+                      <th style={{ padding:"4px 2px" }}></th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {measurements.slice(0,10).map(m => (
+                      <tr key={m.id} style={{ borderBottom:"1px solid #1a1a1a", color:"#c8b890" }}>
+                        <td style={{ padding:"5px 6px", color:"#6b6b5a" }}>{m.date}</td>
+                        <td style={{ padding:"5px 6px", textAlign:"right" }}>{m.weight ? `${m.weight} kg` : '—'}</td>
+                        <td style={{ padding:"5px 6px", textAlign:"right" }}>{m.waist ? `${m.waist} cm` : '—'}</td>
+                        <td style={{ padding:"5px 6px", textAlign:"right" }}>{m.hips ? `${m.hips} cm` : '—'}</td>
+                        <td style={{ padding:"5px 6px", textAlign:"right" }}>{m.bodyFat ? `${m.bodyFat}%` : '—'}</td>
+                        <td style={{ padding:"5px 2px", textAlign:"right" }}>
+                          <button onClick={async()=>{ await fetch('/api/measurements',{ method:'DELETE', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ id: m.id }) }); setMeasurements(prev=>prev.filter(x=>x.id!==m.id)); }}
+                            style={{ background:"transparent", border:"none", color:"#5a3a3a", cursor:"pointer", fontSize:"0.8rem", padding:0 }}>🗑</button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+            {measurements.length === 0 && !measureOpen && (
+              <div style={{ fontSize:"0.6rem", color:"#3a3a2a", textAlign:"center", paddingTop:10 }}>Aucune mensuration enregistrée</div>
+            )}
+          </div>
+
         </>)}
 
         {/* ─── PROGRAMME ─── */}
@@ -2500,7 +2750,7 @@ export default function App() {
               const prog = nutritionProgram;
               const DAYS = ['Lundi','Mardi','Mercredi','Jeudi','Vendredi','Samedi','Dimanche'];
 
-              if (!prog && coachLinked && !selfNutritionAllowed) return (
+              if (!prog && coachLinked) return (
                 <div style={{ textAlign:"center", padding:"40px 16px" }}>
                   <div style={{ fontSize:"1.6rem", marginBottom:10 }}>🥗</div>
                   <div style={{ fontSize:"0.72rem", color:"#c8b890", marginBottom:6 }}>Ton coach s'occupe de ta nutrition</div>
@@ -2573,8 +2823,8 @@ export default function App() {
               const currentDay = prog.days?.[nutritionEditDay];
               return (
                 <div>
-                  {/* Actions programme — masquées si coach a déjà envoyé un programme */}
-                  {!coachProgram && <div style={{ display:"flex", gap:6, marginBottom:14 }}>
+                  {/* Actions programme — masquées si affilié à un coach ou si coach a déjà envoyé un programme */}
+                  {!coachLinked && !coachProgram && <div style={{ display:"flex", gap:6, marginBottom:14 }}>
                     <button onClick={()=>setNutritionGenOpen(true)} disabled={!!user?.isViewAs} style={{ flex:1, background:"#0d0d0d", border:"1px solid #2a2a2a", borderRadius:8, padding:"7px 10px", color:"#5a5a4a", fontFamily:"'DM Mono',monospace", fontSize:"0.6rem", cursor: user?.isViewAs?"not-allowed":"pointer", opacity: user?.isViewAs?0.4:1 }}>↻ Regénérer</button>
                     {nutritionConfirmDelProg ? (
                       <>
@@ -2807,7 +3057,7 @@ export default function App() {
                 <button onClick={()=>setReviewResult(null)} style={{ background:"transparent", border:"none", color:"#5a5a4a", fontSize:"1.2rem", cursor:"pointer" }}>✕</button>
               </div>
               <div style={{ fontSize:"0.6rem", color:"#7abf8a", marginBottom:16, background:"#0d1a0d", border:"1px solid #3a7a3a", borderRadius:8, padding:"8px 12px" }}>
-                ✓ Analyse IA terminée — vérifiez et modifiez avant d'envoyer au patient
+                ✓ Analyse IA terminée — vérifiez et modifiez avant d'envoyer à l'élève
               </div>
 
               {/* Résumé */}
@@ -2852,7 +3102,7 @@ export default function App() {
 
               {bloodError && <div className="error-msg">{bloodError}</div>}
               <button className="btn" style={{ width:"100%", fontSize:"0.75rem", padding:"12px" }} onClick={handleConfirmAnalysis} disabled={confirmLoading}>
-                {confirmLoading ? "Envoi en cours…" : "✓ Confirmer et envoyer au patient"}
+                {confirmLoading ? "Envoi en cours…" : "✓ Confirmer et envoyer à l'élève"}
               </button>
               <button onClick={()=>setReviewResult(null)} style={{ width:"100%", marginTop:8, background:"transparent", border:"1px solid #2a2a2a", borderRadius:8, padding:"10px", color:"#5a5a4a", fontFamily:"'DM Mono',monospace", fontSize:"0.65rem", cursor:"pointer" }}>
                 {t('app.cancel')}
@@ -3138,7 +3388,7 @@ export default function App() {
             {/* ── 5. Historique santé ── */}
             <div className="profil-card">
               <div className="profil-card-title">Historique de santé</div>
-              <div style={{ fontSize:"0.6rem", color:"#4a4a3a", marginBottom:10, lineHeight:1.6 }}>Antécédents, pathologies, allergies, traitements en cours… L'IA en tient compte pour toutes ses recommandations.</div>
+              <div style={{ fontSize:"0.6rem", color:"#4a4a3a", marginBottom:10, lineHeight:1.6 }}>Antécédents, pathologies, allergies, traitements en cours… {coachLinked ? 'Ton coach en tient compte pour ses recommandations.' : "L'IA en tient compte pour toutes ses recommandations."}</div>
               <textarea value={healthHistory} onChange={e=>setHealthHistory(e.target.value)}
                 placeholder="Ex: calculs rénaux (2023), intolérance au lactose, hypertension légère, traitement vitamine D…"
                 style={{ width:"100%", background:"#0d0d0d", border:"1px solid #2a2a2a", borderRadius:10, padding:"10px 12px", color:"#e8e0d0", fontFamily:"'DM Mono',monospace", fontSize:"0.68rem", outline:"none", resize:"none", minHeight:80, lineHeight:1.6 }}/>
@@ -3171,7 +3421,7 @@ export default function App() {
                     </button>
                   : (user?.activePlan === 'free' && !user?.inTrial)
                     ? <button className="strava-connect-btn" onClick={()=>setUpgradeModal({ feature:'strava' })}>Connecter</button>
-                    : <a href="/api/strava/auth"><button className="strava-connect-btn">Connecter</button></a>
+                    : <button className="strava-connect-btn" onClick={()=>{ const p=window.open('/api/strava/auth','strava_oauth','width=600,height=700,popup'); if(!p) window.location.href='/api/strava/auth'; }}>Connecter</button>
                 }
               </div>
 
@@ -3218,6 +3468,75 @@ export default function App() {
                 </div>
               )}
             </div>}
+
+            {/* ── Bilan initial ── */}
+            {coachLinked && !user?.isViewAs && (
+              <div className="profil-card">
+                <div className="profil-card-title">Bilan initial</div>
+
+                {intake && !intakeOpen && (
+                  <div>
+                    <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:8 }}>
+                      <div style={{ fontSize:"0.6rem", color:"#7abf8a" }}>✓ Bilan rempli</div>
+                      <button onClick={()=>{ setIntakeForm({ allergies: intake.allergies||'', goals: intake.goals||'', medicalHistory: intake.medicalHistory||'', injuries: intake.injuries||'', lifestyle: intake.lifestyle||'', motivation: intake.motivation||'' }); setIntakeOpen(true); }}
+                        style={{ background:"transparent", border:"1px solid #2a2a2a", borderRadius:6, padding:"3px 10px", color:"#6b6b5a", fontFamily:"'DM Mono',monospace", fontSize:"0.55rem", cursor:"pointer" }}>
+                        Modifier
+                      </button>
+                    </div>
+                    {intake.goals && <div style={{ fontSize:"0.62rem", color:"#a0a090", fontStyle:"italic", lineHeight:1.5 }}>"{intake.goals.slice(0,120)}{intake.goals.length>120?'…':''}"</div>}
+                  </div>
+                )}
+
+                {!intake && !intakeOpen && (
+                  <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", gap:10 }}>
+                    <div>
+                      <div style={{ fontSize:"0.65rem", color:"#c8b890" }}>📋 Ton coach attend ton bilan initial</div>
+                      <div style={{ fontSize:"0.57rem", color:"#5a5a4a", marginTop:3 }}>Renseigne tes objectifs, antécédents et habitudes</div>
+                    </div>
+                    <button onClick={()=>setIntakeOpen(true)}
+                      style={{ background:"#1e1a12", border:"1px solid #c8b890", borderRadius:8, padding:"7px 12px", color:"#c8b890", fontFamily:"'DM Mono',monospace", fontSize:"0.6rem", cursor:"pointer", whiteSpace:"nowrap" }}>
+                      Remplir maintenant
+                    </button>
+                  </div>
+                )}
+
+                {intakeOpen && (
+                  <div>
+                    {[
+                      { key:'allergies',      label:'Allergies / intolérances' },
+                      { key:'goals',          label:'Objectifs' },
+                      { key:'medicalHistory', label:'Antécédents médicaux' },
+                      { key:'injuries',       label:'Blessures actuelles' },
+                      { key:'lifestyle',      label:'Mode de vie (travail, stress, sport)' },
+                      { key:'motivation',     label:'Motivation' },
+                    ].map(({ key, label }) => (
+                      <div key={key} style={{ marginBottom:10 }}>
+                        <div style={{ fontSize:"0.55rem", color:"#6b6b5a", marginBottom:3, fontFamily:"'DM Mono',monospace", letterSpacing:1 }}>{label.toUpperCase()}</div>
+                        <textarea value={intakeForm[key]} onChange={e=>setIntakeForm(f=>({...f,[key]:e.target.value}))} rows={2} placeholder="—"
+                          style={{ width:"100%", background:"#0d0d0d", border:"1px solid #2a2a2a", borderRadius:8, padding:"7px 10px", color:"#e8e0d0", fontFamily:"'DM Mono',monospace", fontSize:"0.68rem", outline:"none", resize:"none" }}/>
+                      </div>
+                    ))}
+                    <div style={{ display:"flex", gap:8 }}>
+                      <button onClick={()=>setIntakeOpen(false)}
+                        style={{ flex:1, padding:"8px", background:"transparent", border:"1px solid #2a2a2a", borderRadius:8, color:"#5a5a4a", fontFamily:"'DM Mono',monospace", fontSize:"0.62rem", cursor:"pointer" }}>
+                        Annuler
+                      </button>
+                      <button className="btn" style={{ flex:2, fontSize:"0.68rem" }} disabled={intakeSaving}
+                        onClick={async()=>{
+                          setIntakeSaving(true);
+                          const res = await fetch('/api/athlete/intake',{ method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(intakeForm) });
+                          const d = await res.json();
+                          setIntake(d.intake || intakeForm);
+                          setIntakeSaving(false);
+                          setIntakeOpen(false);
+                        }}>
+                        {intakeSaving ? '…' : 'Enregistrer le bilan'}
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
 
             {/* ── 7. Données & app ── */}
             {!user?.isViewAs && (
@@ -3346,7 +3665,7 @@ export default function App() {
           {/* Bouton analyser bilan reçu (viewAs uniquement) */}
           {user?.isViewAs && pendingBlood && (
             <div style={{ background:"#0d1a0d", border:"1px solid #3a7a3a", borderRadius:10, padding:"14px 16px", marginBottom:16 }}>
-              <div style={{ fontSize:"0.68rem", color:"#7abf8a", marginBottom:8 }}>📎 Bilan reçu du patient — {pendingBlood.count} fichier{pendingBlood.count>1?'s':''} · {new Date(pendingBlood.sentAt).toLocaleDateString('fr-FR')}</div>
+              <div style={{ fontSize:"0.68rem", color:"#7abf8a", marginBottom:8 }}>📎 Bilan reçu de l'élève — {pendingBlood.count} fichier{pendingBlood.count>1?'s':''} · {new Date(pendingBlood.sentAt).toLocaleDateString('fr-FR')}</div>
               <button className="btn" style={{ width:"100%", fontSize:"0.7rem" }} onClick={handleAnalyzePending} disabled={analyzeLoading}>
                 {analyzeLoading ? <span className="dot-pulse"><span/><span/><span/></span> : "🔬 Analyser ce bilan"}
               </button>
@@ -3363,7 +3682,7 @@ export default function App() {
           </>)}
 
           {bloodLoading && <div className="loading-row"><div className="dot-pulse"><span/><span/><span/></div>{t('app.blood_analyzing')}</div>}
-          {analyzeLoading && <div className="loading-row"><div className="dot-pulse"><span/><span/><span/></div>Analyse du bilan patient en cours…</div>}
+          {analyzeLoading && <div className="loading-row"><div className="dot-pulse"><span/><span/><span/></div>Analyse du bilan de l'élève en cours…</div>}
           {bloodError && <div className="error-msg">{bloodError}</div>}
           {bloodTests.length >= 1 && !user?.isViewAs && !coachLinked && (
             <div style={{ display:"flex", gap:8, marginBottom:16 }}>

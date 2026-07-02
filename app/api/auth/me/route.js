@@ -20,7 +20,7 @@ export async function GET(req) {
   const users = await db.get('auth:users') || [];
   const u = users.find(u => u.id === session.userId);
 
-  const ownerPlan = { 'pizzachezcyrilajaccio@gmail.com': 'pro', 'spanocyril22@gmail.com': 'coach_pro' }[u?.email];
+  const ownerPlan = { 'pizzachezcyrilajaccio@gmail.com': 'pro', 'spanocyril22@gmail.com': 'coach_pro' }[u?.email ?? session.email];
   const hasPaidPlan = u?.plan && u.plan !== 'free' && u?.planExpiresAt && Date.now() < u.planExpiresAt;
   const inTrial = !hasPaidPlan && u?.trialEndsAt && Date.now() < u.trialEndsAt;
   const coachId = await userDb(session.userId).get('coachId');

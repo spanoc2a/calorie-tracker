@@ -8,12 +8,17 @@ export async function GET(req) {
   const error = searchParams.get('error');
   const nonce = searchParams.get('state');
 
-  if (error || !code || !nonce) return Response.redirect(`${BASE}/?strava=error`);
+  if (error || !code || !nonce) {
+    return Response.redirect(`${BASE}/?strava=error&reason=${error || 'missing_params'}`);
+  }
 
   // Vérifier le nonce
   const nonceData = await db.get(`strava:nonce:${nonce}`);
-  if (!nonceData || Date.now() - nonceData.createdAt > 10 * 60 * 1000) {
-    return Response.redirect(`${BASE}/?strava=error`);
+  if (!nonceData) {
+    return Response.redirect(`${BASE}/?strava=error&reason=nonce_not_found`);
+  }
+  if (Date.now() - nonceData.createdAt > 10 * 60 * 1000) {
+    return Response.redirect(`${BASE}/?strava=error&reason=nonce_expired`);
   }
   await db.del(`strava:nonce:${nonce}`);
   const userId = nonceData.userId;
@@ -30,7 +35,10 @@ export async function GET(req) {
   });
 
   const data = await res.json();
-  if (!res.ok) return Response.redirect(`${BASE}/?strava=error`);
+  if (!res.ok) {
+    const reason = encodeURIComponent(data.message || `http_${res.status}`);
+    return Response.redirect(`${BASE}/?strava=error&reason=${reason}`);
+  }
 
   const tokenData = {
     access_token: data.access_token,
@@ -44,5 +52,5 @@ export async function GET(req) {
   };
 
   await userDb(userId).set('strava:token', tokenData);
-  return Response.redirect(`${BASE}/?strava=connected`);
+  return Response.redirect(`${BASE}/strava-success`);
 }
