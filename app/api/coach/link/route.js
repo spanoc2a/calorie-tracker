@@ -38,6 +38,8 @@ export async function POST(req) {
   if (existingCoach === coachId) return Response.json({ error: 'Déjà lié à ce coach' }, { status: 400 });
 
   await udb.set('coachId', coachId);
+  // Horodatage du rattachement — base de la séquence de bienvenue (cron coach-automations).
+  await udb.set('coachLinkedAt', new Date().toISOString());
   if (Object.keys(invitePerms).length > 0) {
     const currentSettings = await udb.get('userSettings') || {};
     await udb.set('userSettings', { ...currentSettings, ...invitePerms });

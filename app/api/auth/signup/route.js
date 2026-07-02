@@ -43,6 +43,8 @@ export async function POST(req) {
       const pending = await db.get(`coach:emailInvite:${user.email}`);
       if (pending?.coachId && pending.coachId !== id) {
         await userDb(id).set('coachId', pending.coachId);
+        // Horodatage du rattachement — base de la séquence de bienvenue (cron coach-automations).
+        await userDb(id).set('coachLinkedAt', new Date().toISOString());
         const athletes = await db.get(`coach:${pending.coachId}:athletes`) || [];
         if (!athletes.includes(id)) await db.set(`coach:${pending.coachId}:athletes`, [...athletes, id]);
         await db.del(`coach:emailInvite:${user.email}`);
