@@ -45,7 +45,13 @@ export async function POST(req) {
         headers: { Authorization: `Bearer ${token.access_token}` },
       });
       const body = await r.json().catch(() => null);
+      // /athlete (scope profile) vs /athlete/activities (scope activity:read) :
+      // si le profil passe mais pas les activités → scope manquant, pas de suspension.
+      const rp = await fetch('https://www.strava.com/api/v3/athlete', {
+        headers: { Authorization: `Bearer ${token.access_token}` },
+      });
       apiTest = {
+        athleteStatus: rp.status,
         status: r.status,
         rateUsage: r.headers.get('x-ratelimit-usage'),
         rateLimit: r.headers.get('x-ratelimit-limit'),
