@@ -25,17 +25,17 @@ export async function GET(req) {
   if (!me || me.role !== 'coach') return Response.json({ error: 'Accès refusé' }, { status: 403 });
 
   const athleteIds = await db.get(`coach:${auth.userId}:athletes`) || [];
-  const today = localDate();
-  const last7 = getLastNDates(7);
+  const last7 = getLastNDates(7); // last7[0] = aujourd'hui
 
   const athletes = await Promise.all(athleteIds.map(async id => {
     const user = users.find(u => u.id === id);
     if (!user) return null;
     const udb = userDb(id);
 
-    const [settings, todayEntries, weightLog, stravaCache, bloodTests, reportRequest, pendingBlood, hc, mediaItems] = await Promise.all([
+    // Budget requêtes : day:today est retiré (last7[0] EST aujourd'hui → réutilise week[0]),
+    // muscuSets + checkins + chat ajoutés → net +2 requêtes par athlète.
+    const [settings, weightLog, stravaCache, bloodTests, reportRequest, pendingBlood, hc, mediaItems, muscuSets, checkins, chatMessages] = await Promise.all([
       udb.get('userSettings').then(s => s || {}),
-      udb.get(`day:${today}`).then(e => e || []),
       udb.get('weightLog').then(w => (w || []).slice(-2)),
       udb.get('stravaCache').then(s => s || null),
       udb.get('bloodTests').then(b => b || []),
@@ -43,10 +43,14 @@ export async function GET(req) {
       udb.get('pendingBloodFiles'),
       udb.get('healthConnectData').then(h => h || null),
       udb.get('mediaItems').then(m => m || []),
+      udb.get('muscuSets').then(m => m || null),
+      udb.get('checkins').then(c => c || []),
+      db.get(`chat:${auth.userId}:${id}`).then(c => c || []),
     ]);
 
     const week = await Promise.all(last7.map(d => udb.get(`day:${d}`).then(e => e || [])));
     const activeDays = week.filter(d => d.length > 0);
+    const todayEntries = week[0];
     const avgKcal = activeDays.length > 0
       ? Math.round(activeDays.reduce((a, d) => a + d.reduce((s, e) => s + (e.kcal || 0), 0), 0) / activeDays.length)
       : 0;
@@ -90,6 +94,34 @@ export async function GET(req) {
       : null;
     const stravaCount7j = stravaActivities.filter(a => last7.includes(a.date)).length;
 
+    // Check-in soumis il y a moins de 72h (les checkins portent submittedAt, stockés récents d'abord).
+    const newCheckin = checkins.some(c => c?.submittedAt && (Date.now() - new Date(c.submittedAt).getTime()) < 72 * 3600 * 1000);
+
+    // Dernier message du thread chat + non-lus côté coach (même définition que le peek du chat).
+    const lastMsg = chatMessages[chatMessages.length - 1] || null;
+    const lastMessage = lastMsg
+      ? { text: lastMsg.text || (lastMsg.image ? '📷 Photo' : ''), at: lastMsg.date, fromCoach: lastMsg.role === 'coach' }
+      : null;
+    const unreadCount = chatMessages.filter(m => m.role !== 'coach' && !m.read).length;
+
+    // Adhérence 7j : jours loggés (day:<date> déjà fetchés) + séances (muscu dates distinctes + Strava).
+    const muscuDates7 = new Set();
+    if (muscuSets && typeof muscuSets === 'object') {
+      for (const byDate of Object.values(muscuSets)) {
+        if (!byDate || typeof byDate !== 'object') continue;
+        for (const [date, sets] of Object.entries(byDate)) {
+          if (Array.isArray(sets) && sets.length > 0 && last7.includes(date)) muscuDates7.add(date);
+        }
+      }
+    }
+    const loggedDays7 = activeDays.length;
+    const sessions7 = muscuDates7.size + stravaCount7j;
+    const adherence = {
+      loggedDays7,
+      sessions7,
+      score: Math.round(65 * (loggedDays7 / 7) + 35 * Math.min(sessions7 / 3, 1)),
+    };
+
     return {
       id, name: user.name, email: user.email,
       mediaUnseen: mediaItems.filter(m => !m.viewedAt && !m.expired).length, // suivi photo/vidéo non encore visionné
@@ -125,8 +157,13 @@ export async function GET(req) {
       reportRequest: reportRequest || null,
       pendingBlood: pendingBlood ? { sentAt: pendingBlood.sentAt, count: pendingBlood.files.length } : null,
       todayJournal: todayEntries.map(e => ({ name: e.name, meal: e.meal, kcal: e.kcal||0, protein: e.protein||0, carbs: e.carbs||0, fat: e.fat||0 })),
-      selfNutritionAllowed: settings.selfNutritionAllowed !== false,
-      selfMuscuAllowed: settings.selfMuscuAllowed !== false,
+      newCheckin,
+      lastMessage,
+      unreadCount,
+      adherence,
+      // Défaut REFUSÉ (règle IA-invisible) : seul un true explicite posé par le coach autorise.
+      selfNutritionAllowed: settings.selfNutritionAllowed === true,
+      selfMuscuAllowed: settings.selfMuscuAllowed === true,
     };
   }));
 

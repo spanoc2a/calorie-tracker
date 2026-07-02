@@ -1,6 +1,6 @@
 import crypto from 'crypto';
 import { db } from '../../db';
-import { sessionCookie } from '../session';
+import { sessionCookie, registerSession } from '../session';
 import { rateLimit } from '../../../lib/ratelimit';
 
 const ITERATIONS = 100_000;
@@ -20,7 +20,12 @@ export async function POST(req) {
   const users = await db.get('auth:users') || [];
   const user = users.find(u => u.email === email.toLowerCase());
   const iterations = user?.iterations || 10_000;
-  if (!user || hashPassword(password, user.salt, iterations) !== user.passwordHash) {
+  if (!user) {
+    // Anti-énumération : coût PBKDF2 identique que l'email existe ou non.
+    hashPassword(password, 'dummy-salt-anti-enumeration', ITERATIONS);
+    return Response.json({ error: 'Email ou mot de passe incorrect' }, { status: 401 });
+  }
+  if (hashPassword(password, user.salt, iterations) !== user.passwordHash) {
     return Response.json({ error: 'Email ou mot de passe incorrect' }, { status: 401 });
   }
 
@@ -33,6 +38,7 @@ export async function POST(req) {
 
   const token = crypto.randomUUID();
   await db.set(`session:${token}`, { userId: user.id, email: user.email, name: user.name, role: user.role, expiresAt: Date.now() + 90 * 24 * 3600 * 1000 });
+  await registerSession(user.id, token);
 
   return Response.json({ user: { id: user.id, email: user.email, name: user.name, role: user.role }, token }, {
     headers: { 'Set-Cookie': sessionCookie(token) },

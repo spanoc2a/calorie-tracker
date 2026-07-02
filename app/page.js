@@ -1089,8 +1089,8 @@ export default function App() {
         const hasProfile = s.height || s.weight || s.birthdate;
         if (!s.onboardingDone && !hasProfile) { window.location.href = '/onboarding'; return; }
         if (s.coachId) setCoachLinked(s.coachId);
-        setSelfNutritionAllowed(s.selfNutritionAllowed !== false);
-        setSelfMuscuAllowed(s.selfMuscuAllowed !== false);
+        setSelfNutritionAllowed(s.coachId ? s.selfNutritionAllowed === true : true);
+        setSelfMuscuAllowed(s.coachId ? s.selfMuscuAllowed === true : true);
         if (s.healthHistory) setHealthHistory(s.healthHistory);
         setSettingsLoaded(true);
       })

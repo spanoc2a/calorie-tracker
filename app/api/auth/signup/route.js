@@ -1,6 +1,6 @@
 import crypto from 'crypto';
 import { db, userDb } from '../../db';
-import { sessionCookie } from '../session';
+import { sessionCookie, registerSession } from '../session';
 import { rateLimit } from '../../../lib/ratelimit';
 import { sendWelcomeEmail } from '../../../lib/email';
 
@@ -33,6 +33,7 @@ export async function POST(req) {
 
   const token = crypto.randomUUID();
   await db.set(`session:${token}`, { userId: id, email: user.email, name, role, expiresAt: Date.now() + 90 * 24 * 3600 * 1000 });
+  await registerSession(id, token);
 
   // Auto-rattachement : si un coach a invité cet email, on lie l'élève DÈS l'inscription
   // → il atterrit direct en mode coaché, jamais sur le freemium / l'IA.

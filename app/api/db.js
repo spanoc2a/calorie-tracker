@@ -29,7 +29,29 @@ export const db = {
       .delete()
       .eq('key', key);
   },
+
+  // Liste toutes les entrées dont la clé commence par `prefix` (kv_store = Postgres → LIKE).
+  async listPrefix(prefix) {
+    const { data } = await supabase
+      .from('kv_store')
+      .select('key,value')
+      .like('key', escapeLike(prefix) + '%');
+    return data || [];
+  },
+
+  // Supprime toutes les entrées dont la clé commence par `prefix`.
+  async deletePrefix(prefix) {
+    await supabase
+      .from('kv_store')
+      .delete()
+      .like('key', escapeLike(prefix) + '%');
+  },
 };
+
+// Échappe les métacaractères LIKE (%, _) pour que le préfixe soit traité littéralement.
+function escapeLike(s) {
+  return String(s).replace(/[\\%_]/g, '\\$&');
+}
 
 export function userDb(userId) {
   return {

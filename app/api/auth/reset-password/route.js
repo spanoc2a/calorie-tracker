@@ -1,5 +1,6 @@
 import crypto from 'crypto';
 import { db } from '../../db';
+import { revokeAllSessions } from '../session';
 import { rateLimit } from '../../../lib/ratelimit';
 import { sendResetEmail } from '../../../lib/email';
 
@@ -54,6 +55,9 @@ export async function PUT(req) {
   users[idx] = { ...users[idx], salt, passwordHash: hashPassword(password, salt), iterations: ITERATIONS };
   await db.set('auth:users', users);
   await db.del(`reset:${token}`);
+
+  // Révoque toutes les sessions connues de l'utilisateur (mot de passe compromis ?).
+  await revokeAllSessions(reset.userId);
 
   return Response.json({ ok: true });
 }

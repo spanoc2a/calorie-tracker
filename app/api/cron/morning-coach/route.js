@@ -168,6 +168,9 @@ async function sendExpoPush(token, title, body, data = {}) {
 async function processMorningCoach(userId, userName) {
   const user = await getUserWithPlan(userId);
   if (!user || !isPro(user.activePlan)) return false;
+  // Règle produit "IA invisible" : un élève rattaché à un coach ne reçoit JAMAIS
+  // de contenu IA non validé — son coach reste son point de contact.
+  if (user.hasCoach) return false;
 
   const udb = userDb(userId);
   const today = getDateString(0);

@@ -1,6 +1,13 @@
 import { db } from '../../../api/db';
+import { rateLimit } from '../../../lib/ratelimit';
 
 export async function GET(req) {
+  // Endpoint volontairement non authentifié → rate-limit par IP contre le brute-force de codes.
+  const ip = req.headers.get('x-forwarded-for')?.split(',')[0]?.trim() || 'unknown';
+  if (!(await rateLimit(`coach-lookup:${ip}`, 20, 3_600_000))) {
+    return Response.json({ error: 'Trop de tentatives, réessaie plus tard' }, { status: 429 });
+  }
+
   const { searchParams } = new URL(req.url);
   const code = searchParams.get('code');
   if (!code) return Response.json({ error: 'Code manquant' }, { status: 400 });

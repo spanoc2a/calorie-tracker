@@ -1,7 +1,14 @@
 import { db, userDb } from '../../../api/db';
 import { requireAuth } from '../../../api/auth/session';
+import { rateLimit } from '../../../lib/ratelimit';
 
 export async function POST(req) {
+  // Rate-limit par IP contre le brute-force de codes d'invitation.
+  const ip = req.headers.get('x-forwarded-for')?.split(',')[0]?.trim() || 'unknown';
+  if (!(await rateLimit(`coach-link:${ip}`, 20, 3_600_000))) {
+    return Response.json({ error: 'Trop de tentatives, réessaie plus tard' }, { status: 429 });
+  }
+
   const auth = await requireAuth(req); if (auth.error) return auth.error;
   const { code } = await req.json();
   if (!code) return Response.json({ error: 'Code manquant' }, { status: 400 });

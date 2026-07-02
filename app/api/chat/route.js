@@ -44,13 +44,18 @@ export async function GET(req) {
     return Response.json({ unreadCount });
   }
 
-  // Marquer les messages de l'autre côté comme lus
-  let changed = false;
-  const updated = messages.map(m => {
-    if (m.role !== t.role && !m.read) { changed = true; return { ...m, read: true }; }
-    return m;
-  });
-  if (changed) await db.set(key, updated);
+  // Marquer les messages de l'autre côté comme lus.
+  // View-as (coach qui impersone l'élève) : lecture seule → on renvoie les messages
+  // mais on ne marque RIEN comme lu (même comportement que ?peek=1 pour le marquage).
+  let updated = messages;
+  if (!auth.isViewAs) {
+    let changed = false;
+    updated = messages.map(m => {
+      if (m.role !== t.role && !m.read) { changed = true; return { ...m, read: true }; }
+      return m;
+    });
+    if (changed) await db.set(key, updated);
+  }
 
   // Signe les éventuelles photos jointes (URLs temporaires de lecture).
   const withUrls = await Promise.all(updated.map(async m => m.image ? { ...m, imageUrl: await signRead(m.image) } : m));

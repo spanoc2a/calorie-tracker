@@ -141,6 +141,9 @@ function formatIntake(intake) {
 async function generateWeeklyReport(userId) {
   const user = await getUserWithPlan(userId);
   if (!user || !isPro(user.activePlan)) return null;
+  // Règle produit "IA invisible" : un élève rattaché à un coach ne reçoit JAMAIS
+  // de bilan IA non validé — son coach reste son point de contact.
+  if (user.hasCoach) return null;
 
   const udb = userDb(userId);
   const dates = getLastNDates(7);

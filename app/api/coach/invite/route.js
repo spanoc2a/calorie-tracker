@@ -16,12 +16,13 @@ export async function POST(req) {
   const { label = '', selfNutritionAllowed = true, selfMuscuAllowed = false } = await req.json().catch(() => ({}));
 
   // Code court lisible (6 chars sans lettres/chiffres ambigus) utilisable à la fois
-  // comme token dans le lien et comme code à taper manuellement dans l'app
+  // comme token dans le lien et comme code à taper manuellement dans l'app.
+  // crypto.randomInt = CSPRNG (Math.random était prédictible).
   const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
   let token;
   let attempts = 0;
   do {
-    token = Array.from({ length: 6 }, () => chars[Math.floor(Math.random() * chars.length)]).join('');
+    token = Array.from({ length: 6 }, () => chars[crypto.randomInt(chars.length)]).join('');
     attempts++;
   } while ((await db.get(`invite:${token}`)) && attempts < 10);
 

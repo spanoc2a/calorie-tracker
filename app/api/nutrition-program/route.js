@@ -62,8 +62,15 @@ export async function POST(req) {
   const auth = await requireAuth(req); if (auth.error) return auth.error;
   const allowed = await rateLimit(`nutrition-program:${auth.userId}`, 20, 3_600_000);
   if (!allowed) return Response.json({ error: 'Trop de requêtes, réessaie dans un moment' }, { status: 429 });
-  // Élève rattaché à un coach : la génération est gérée par le coach (anti court-circuit).
-  if (await userDb(auth.userId).get('coachId')) return Response.json({ error: 'COACH_MANAGED', message: 'Ton coach gère ton programme nutritionnel.' }, { status: 403 });
+  // Élève rattaché à un coach : la génération est gérée par le coach (anti court-circuit),
+  // sauf si le coach a explicitement autorisé l'autonomie (défaut = refusé, règle IA-invisible).
+  const coachIdGate = await userDb(auth.userId).get('coachId');
+  if (coachIdGate) {
+    const gateSettings = await userDb(auth.userId).get('userSettings') || {};
+    if (gateSettings.selfNutritionAllowed !== true) {
+      return Response.json({ error: 'COACH_MANAGED', message: 'Ton coach gère ton programme nutritionnel.' }, { status: 403 });
+    }
+  }
   const access = await checkProgramLimit(auth.userId);
   if (!access.allowed) return access.limitLabel
     ? Response.json({ error: 'PROGRAM_LIMIT', limitLabel: access.limitLabel }, { status: 429 })

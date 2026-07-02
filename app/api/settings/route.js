@@ -1,10 +1,11 @@
 import { db, userDb } from '../db';
 import { requireAuth } from '../auth/session';
 
+// selfNutritionAllowed / selfMuscuAllowed ne sont PAS dans les défauts : ils sont renvoyés
+// tels que stockés (posés uniquement par le coach via coach/athlete). Défaut = refusé quand coaché.
 const DEFAULTS = {
   goalKcal: 2000, goalProtein: 150, goalCarbs: 250, goalFat: 70,
   reminderEnabled: false, reminderTime: '12:00',
-  selfNutritionAllowed: true, selfMuscuAllowed: true,
 };
 
 function goalsChanged(prev, next) {
@@ -31,6 +32,10 @@ export async function POST(req) {
   const auth = await requireAuth(req); if (auth.error) return auth.error;
   const udb = userDb(auth.userId);
   const body = await req.json();
+  // Ces permissions sont réservées au coach (coach/athlete) : on empêche l'élève
+  // de s'auto-autoriser en les postant depuis le client.
+  delete body.selfNutritionAllowed;
+  delete body.selfMuscuAllowed;
   const current = await udb.get('userSettings') || {};
   const updated = { ...DEFAULTS, ...current, ...body };
   await udb.set('userSettings', updated);
