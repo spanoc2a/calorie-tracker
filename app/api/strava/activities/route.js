@@ -106,6 +106,10 @@ export async function GET(req) {
     await udb.set('strava:token', null);
     return Response.json({ connected: false, debug: 'token_revoked' });
   }
+  // 403 = accès API refusé par Strava (app suspendue / quota athlètes) — diagnostiqué
+  // le 2026-07-03 : token valide mais TOUTES les ressources Forbidden. On le signale
+  // explicitement pour que l'app affiche un état clair au lieu d'un vide inexpliqué.
+  if (res.status === 403) return Response.json({ connected: true, activities: [], unavailable: true });
   if (!res.ok) return Response.json({ connected: true, activities: [], error: data.message });
 
   // Mode semaine : retourne les calories brûlées groupées par date avec détails précis
