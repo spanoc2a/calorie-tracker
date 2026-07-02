@@ -78,7 +78,10 @@ async function getToken(udb) {
 }
 
 export async function GET(req) {
-  const auth = await requireAuth(req); if (auth.error) return Response.json({ connected: false, debug: 'not_authenticated' });
+  // ⚠️ Ne pas avaler le 401 : une session morte doit remonter en 401 pour que
+  // l'app déclenche la reconnexion — sinon l'utilisateur voit juste « plus de
+  // données Strava » sans comprendre (bug diagnostiqué le 2026-07-03).
+  const auth = await requireAuth(req); if (auth.error) return auth.error;
   const access = await checkStravaAccess(auth.userId, auth.email);
   if (!access.allowed) return upgradeResponse('strava');
   const udb = userDb(auth.userId);
