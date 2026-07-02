@@ -11,7 +11,28 @@ export async function POST(req) {
   if (authz !== `Bearer ${ONE_SHOT_TOKEN}`) {
     return Response.json({ error: 'Unauthorized' }, { status: 401 });
   }
-  const { email } = await req.json().catch(() => ({}));
+  const { email, all } = await req.json().catch(() => ({}));
+
+  // Vue d'ensemble : quel compte a un token Strava / un cache récent / quel plan.
+  if (all) {
+    const { listUsers } = await import('../../users');
+    const users = await listUsers();
+    const rows = [];
+    for (const u of users) {
+      const [tok, cache] = await Promise.all([
+        userDb(u.id).get('strava:token'),
+        userDb(u.id).get('stravaCache'),
+      ]);
+      rows.push({
+        email: u.email, role: u.role || 'athlete', plan: u.plan || null,
+        trialEndsAt: u.trialEndsAt ? new Date(u.trialEndsAt).toISOString().slice(0, 10) : null,
+        hasStravaToken: !!tok,
+        cacheUpdatedAt: cache?.updatedAt?.slice(0, 16) || null,
+      });
+    }
+    return Response.json({ users: rows });
+  }
+
   const id = await db.get(`useremail:${String(email || '').toLowerCase().trim()}`);
   if (!id) return Response.json({ found: false });
 
