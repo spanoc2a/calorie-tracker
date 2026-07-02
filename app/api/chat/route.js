@@ -1,10 +1,10 @@
 import { db, userDb } from '../db';
+import { getUser } from '../users';
 import { requireAuth } from '../auth/session';
 import { signRead } from '../../lib/storage';
 
 async function resolveThread(auth) {
-  const users = await db.get('auth:users') || [];
-  const me = users.find(u => u.id === auth.userId);
+  const me = await getUser(auth.userId);
   if (!me) return { error: 'Utilisateur introuvable' };
 
   if (me.role === 'coach') {

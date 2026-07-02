@@ -1,5 +1,6 @@
 import crypto from 'crypto';
 import { db } from '../../db';
+import { getUserByEmail, updateUser } from '../../users';
 import { sessionCookie, registerSession } from '../session';
 import { rateLimit } from '../../../lib/ratelimit';
 
@@ -17,8 +18,7 @@ export async function POST(req) {
   const { email, password } = await req.json();
   if (!email || !password) return Response.json({ error: 'Champs manquants' }, { status: 400 });
 
-  const users = await db.get('auth:users') || [];
-  const user = users.find(u => u.email === email.toLowerCase());
+  const user = await getUserByEmail(email);
   const iterations = user?.iterations || 10_000;
   if (!user) {
     // Anti-énumération : coût PBKDF2 identique que l'email existe ou non.
@@ -32,8 +32,7 @@ export async function POST(req) {
   // Migration transparente vers 100k itérations
   if (iterations < ITERATIONS) {
     const newHash = hashPassword(password, user.salt, ITERATIONS);
-    const updated = users.map(u => u.id === user.id ? { ...u, passwordHash: newHash, iterations: ITERATIONS } : u);
-    await db.set('auth:users', updated);
+    await updateUser(user.id, { passwordHash: newHash, iterations: ITERATIONS });
   }
 
   const token = crypto.randomUUID();

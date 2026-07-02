@@ -106,9 +106,8 @@ export async function PATCH(req) {
   await udb.set('pendingBloodFiles', null);
 
   // Notification pour le patient
-  const { db } = await import('../db');
-  const users = await db.get('auth:users') || [];
-  const coach = users.find(u => u.id === auth.coachId);
+  const { getUser } = await import('../users');
+  const coach = await getUser(auth.coachId);
   const notifs = await udb.get('coachNotifications') || [];
   await udb.set('coachNotifications', [{
     id: Date.now(), date: new Date().toISOString(),

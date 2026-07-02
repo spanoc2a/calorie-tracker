@@ -1,4 +1,5 @@
-import { db, userDb } from '../api/db';
+import { userDb } from '../api/db';
+import { getUser } from '../api/users';
 
 const LIMITS = {
   owner:         { suggestions: Infinity, bloodTests: Infinity, programs: Infinity, muscuPrograms: Infinity, aiCoachMessages: Infinity },
@@ -10,8 +11,7 @@ const LIMITS = {
 };
 
 export async function getUserWithPlan(userId) {
-  const users = await db.get('auth:users') || [];
-  const user = users.find(u => u.id === userId);
+  const user = await getUser(userId);
   if (!user) return null;
 
   const ownerPlan = { 'pizzachezcyrilajaccio@gmail.com': 'owner', 'spanocyril22@gmail.com': 'coach_pro' }[user.email];

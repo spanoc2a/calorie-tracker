@@ -1,23 +1,24 @@
-import { db, userDb } from '../../db';
+import { userDb } from '../../db';
+import { runBatchedCron } from '../../../lib/cronBatch';
 
-export const maxDuration = 60;
+export const maxDuration = 300;
 
 // Cron: every Monday 7am — mark weekly check-in as pending notification
 // Athletes will see the check-in banner on their next app open
 export async function GET(req) {
+  const cronSecret = process.env.CRON_SECRET;
   const authHeader = req.headers.get('authorization');
-  if (authHeader !== `Bearer ${process.env.CRON_SECRET}`) {
+  if (!cronSecret || authHeader !== `Bearer ${cronSecret}`) {
     return Response.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
-  const users = await db.get('auth:users') || [];
-  const athletes = users.filter(u => u.role !== 'coach');
-
-  let notified = 0;
-  for (const athlete of athletes) {
-    try {
+  return runBatchedCron(req, 'weekly-checkin', {
+    batch: 100,
+    chunk: 10,
+    filter: (u) => u.role !== 'coach',
+    handler: async (athlete) => {
       const coachId = await userDb(athlete.id).get('coachId');
-      if (!coachId) continue;
+      if (!coachId) return false;
 
       // The checkin GET endpoint already computes pendingWeek dynamically,
       // so no action needed server-side — just send a push reminder
@@ -27,9 +28,7 @@ export async function GET(req) {
         sendPushToUser(athlete.id, '✅ Check-in de la semaine', 'Ton coach attend ton retour hebdomadaire', '/'),
         sendExpoPushToUser(athlete.id, '✅ Check-in de la semaine', 'Ton coach attend ton retour hebdomadaire', { type: 'checkin' }),
       ]);
-      notified++;
-    } catch {}
-  }
-
-  return Response.json({ ok: true, notified });
+      return true;
+    },
+  });
 }

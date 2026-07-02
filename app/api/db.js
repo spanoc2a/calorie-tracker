@@ -39,6 +39,21 @@ export const db = {
     return data || [];
   },
 
+  // Lit plusieurs clés en UNE requête (chunks de 200). Renvoie une Map clé → valeur
+  // (clés absentes = pas d'entrée). Sert à casser les N+1 (ex. dashboard coach).
+  async getMany(keys) {
+    const out = new Map();
+    for (let i = 0; i < keys.length; i += 200) {
+      const chunk = keys.slice(i, i + 200);
+      const { data } = await supabase
+        .from('kv_store')
+        .select('key,value')
+        .in('key', chunk);
+      for (const row of data || []) out.set(row.key, row.value);
+    }
+    return out;
+  },
+
   // Supprime toutes les entrées dont la clé commence par `prefix`.
   async deletePrefix(prefix) {
     await supabase

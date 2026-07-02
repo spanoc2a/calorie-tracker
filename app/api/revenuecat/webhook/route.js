@@ -1,4 +1,4 @@
-import { db } from '../../db';
+import { getUser, updateUser } from '../../users';
 
 // Webhook RevenueCat — débloque la monétisation mobile (abonnements IAP).
 // Auth : header Authorization === REVENUECAT_WEBHOOK_SECRET (fail-closed).
@@ -40,9 +40,8 @@ export async function POST(req) {
   const appUserId = event.app_user_id;
   if (!appUserId) return Response.json({ ok: true });
 
-  const users = await db.get('auth:users') || [];
-  const idx = users.findIndex(u => u.id === appUserId);
-  if (idx === -1) {
+  const user = await getUser(appUserId);
+  if (!user) {
     console.warn('[REVENUECAT] Aucun user pour app_user_id', appUserId);
     return Response.json({ ok: true });
   }
@@ -52,23 +51,20 @@ export async function POST(req) {
   if (GRANT_EVENTS.has(event.type)) {
     // 31 jours par défaut si RevenueCat ne fournit pas d'expiration (ex. non-renewing).
     const expiresAt = event.expiration_at_ms || (now + 31 * 24 * 3600 * 1000);
-    users[idx] = {
-      ...users[idx],
+    await updateUser(user.id, {
       plan: 'pro',
       planStart: now,
       planExpiresAt: expiresAt,
       revenueCatUserId: appUserId,
-    };
-    await db.set('auth:users', users);
+    });
     return Response.json({ ok: true });
   }
 
   if (REVOKE_EVENTS.has(event.type)) {
     // Laisse expirer naturellement : on repasse 'free' uniquement si déjà expiré.
-    const expiresAt = users[idx].planExpiresAt;
+    const expiresAt = user.planExpiresAt;
     if (!expiresAt || now >= expiresAt) {
-      users[idx] = { ...users[idx], plan: 'free', planExpiresAt: null };
-      await db.set('auth:users', users);
+      await updateUser(user.id, { plan: 'free', planExpiresAt: null });
     }
     return Response.json({ ok: true });
   }

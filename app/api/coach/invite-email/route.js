@@ -1,4 +1,5 @@
 import { db } from '../../db';
+import { getUser, getUserByEmail } from '../../users';
 import { requireAuth } from '../../auth/session';
 
 // Invitation d'un élève PAR EMAIL : le coach pré-enregistre l'email ; quand l'élève
@@ -6,10 +7,9 @@ import { requireAuth } from '../../auth/session';
 
 async function requireCoach(req) {
   const auth = await requireAuth(req); if (auth.error) return { error: auth.error };
-  const users = await db.get('auth:users') || [];
-  const me = users.find(u => u.id === auth.userId);
+  const me = await getUser(auth.userId);
   if (!me || me.role !== 'coach') return { error: Response.json({ error: 'Accès refusé' }, { status: 403 }) };
-  return { coachId: auth.userId, users };
+  return { coachId: auth.userId, me };
 }
 
 const EMAIL_RE = /^[^@\s]+@[^@\s]+\.[^@\s]+$/;
@@ -21,7 +21,7 @@ export async function POST(req) {
   if (!EMAIL_RE.test(e)) return Response.json({ error: 'Email invalide' }, { status: 400 });
 
   // Si l'utilisateur a DÉJÀ un compte, on ne peut pas l'auto-lier au signup → renvoyer le code.
-  const existing = v.users.find(u => u.email === e);
+  const existing = await getUserByEmail(e);
   if (existing) {
     if (existing.id === v.coachId) return Response.json({ error: 'C\'est ton propre email.' }, { status: 400 });
     return Response.json({ error: 'EXISTING_USER', message: "Cette personne a déjà un compte — partage-lui plutôt ton code d'invitation." }, { status: 409 });

@@ -1,12 +1,12 @@
 import { requireAuth } from '../../auth/session';
 import { db } from '../../db';
+import { getUser } from '../../users';
 
 export async function GET(req) {
   const auth = await requireAuth(req);
   if (auth.error) return auth.error;
 
-  const users = await db.get('auth:users') || [];
-  const user = users.find(u => u.id === auth.userId);
+  const user = await getUser(auth.userId);
   if (!user?.stripeCustomerId) return Response.json({ error: 'Aucun abonnement actif' }, { status: 404 });
 
   const res = await fetch('https://api.stripe.com/v1/billing_portal/sessions', {

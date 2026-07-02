@@ -1,4 +1,5 @@
 import { db, userDb } from '../db';
+import { getUser } from '../users';
 import { requireAuth } from '../auth/session';
 
 // Marque du coach côté élève : nom d'affichage, spécialité et logo (base64, cf. coach/profile).
@@ -9,8 +10,7 @@ export async function GET(req) {
   const coachId = await userDb(auth.userId).get('coachId');
   if (!coachId) return Response.json({ coach: null });
 
-  const users = await db.get('auth:users') || [];
-  const coach = users.find(u => u.id === coachId);
+  const coach = await getUser(coachId);
   if (!coach) return Response.json({ coach: null }); // coach supprimé, lien orphelin
 
   const profile = await userDb(coachId).get('coachProfile') || {};

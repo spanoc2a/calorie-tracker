@@ -1,4 +1,5 @@
 import { db, userDb } from '../../db';
+import { getUser } from '../../users';
 import { requireAuth } from '../../auth/session';
 import { sendPushToUser } from '../../push/send/route';
 import { sendExpoPushToUser } from '../../../lib/expoPush';
@@ -6,8 +7,7 @@ import { sendExpoPushToUser } from '../../../lib/expoPush';
 // Coach valide un bilan sanguin d'un athlète et le lui envoie
 export async function POST(req) {
   const auth = await requireAuth(req); if (auth.error) return auth.error;
-  const users = await db.get('auth:users') || [];
-  const me = users.find(u => u.id === auth.userId);
+  const me = await getUser(auth.userId);
   if (!me || me.role !== 'coach') return Response.json({ error: 'Accès refusé' }, { status: 403 });
 
   // `edits` optionnel : le coach corrige l'analyse IA (summary, weeklyFocus, markers…)
@@ -27,7 +27,7 @@ export async function POST(req) {
   };
   await udb.set('bloodTests', bloodTests);
 
-  const athlete = users.find(u => u.id === athleteId);
+  const athlete = await getUser(athleteId);
   const btTitle = '🩸 Ton bilan est prêt';
   const btBody = `${me.name} a analysé ton bilan sanguin`;
   sendPushToUser(athleteId, btTitle, btBody, '/').catch(() => {});

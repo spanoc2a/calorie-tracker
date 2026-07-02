@@ -1,4 +1,5 @@
 import { db, userDb } from '../../../api/db';
+import { getUser } from '../../users';
 import { requireAuth } from '../../../api/auth/session';
 import { rateLimit } from '../../../lib/ratelimit';
 
@@ -47,8 +48,7 @@ export async function POST(req) {
     await db.set(`coach:${coachId}:athletes`, [...athletes, auth.userId]);
   }
 
-  const users = await db.get('auth:users') || [];
-  const coach = users.find(u => u.id === coachId);
+  const coach = await getUser(coachId);
   return Response.json({ ok: true, coachName: coach?.name || 'Coach' });
 }
 

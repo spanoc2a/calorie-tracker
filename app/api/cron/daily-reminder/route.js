@@ -1,4 +1,5 @@
-import { db, userDb } from '../../db';
+import { userDb } from '../../db';
+import { runBatchedCron } from '../../../lib/cronBatch';
 import { sendPushToUser } from '../../push/send/route';
 import { sendExpoPushToUser } from '../../../lib/expoPush';
 import { sendTrialEndingEmail } from '../../../lib/email';
@@ -72,24 +73,24 @@ export async function GET(req) {
   }
 
   const today = parisDateKey();
-  const users = await db.get('auth:users') || [];
-
-  // Rappels fin de trial (1 jour et 2 jours avant expiration)
   const now = Date.now();
-  for (const u of users) {
-    if (!u.trialEndsAt || (u.plan && u.plan !== 'free')) continue;
-    const daysLeft = Math.ceil((u.trialEndsAt - now) / (24 * 3600 * 1000));
-    if (daysLeft === 1 || daysLeft === 2) {
-      sendTrialEndingEmail(u.email, u.name, daysLeft).catch(() => {});
-    }
-  }
 
-  const athletes = users.filter(u => u.role !== 'coach');
+  // Un seul passage batché sur TOUS les users : (1) email fin de trial (pas de KV),
+  // (2) rappel de log pour les non-coachs.
+  return runBatchedCron(req, 'daily-reminder', {
+    batch: 100,
+    chunk: 10,
+    handler: async (user) => {
+      // Rappels fin de trial (1 jour et 2 jours avant expiration)
+      if (user.trialEndsAt && (!user.plan || user.plan === 'free')) {
+        const daysLeft = Math.ceil((user.trialEndsAt - now) / (24 * 3600 * 1000));
+        if (daysLeft === 1 || daysLeft === 2) {
+          sendTrialEndingEmail(user.email, user.name, daysLeft).catch(() => {});
+        }
+      }
 
-  let sent = 0, skipped = 0, coachAlerts = 0;
+      if (user.role === 'coach') return false;
 
-  for (const user of athletes) {
-    try {
       const udb = userDb(user.id);
       const [sub, expoToken, todayEntries, settings] = await Promise.all([
         udb.get('pushSubscription'),
@@ -99,21 +100,21 @@ export async function GET(req) {
       ]);
 
       // Aucun canal de notification : on saute.
-      if (!sub?.endpoint && !expoToken) { skipped++; continue; }
+      if (!sub?.endpoint && !expoToken) return false;
 
       // A loggé aujourd'hui : rien à relancer.
-      if (Array.isArray(todayEntries) && todayEntries.length > 0) { skipped++; continue; }
+      if (Array.isArray(todayEntries) && todayEntries.length > 0) return false;
 
       const days = await daysSinceLastLog(udb);
-      if (days === null) { skipped++; continue; } // inactif > 21 jours : on arrête les rappels
+      if (days === null) return false; // inactif > 21 jours : on arrête les rappels
 
       // J7 exactement : en plus du rappel, on alerte le coach si l'élève est coaché.
       if (days === 7) {
-        try { await notifyCoachInactive(user); coachAlerts++; } catch {}
+        try { await notifyCoachInactive(user); } catch {}
       }
 
       // Au-delà de 14 jours : plus de rappel quotidien, seulement 1 rappel hebdomadaire.
-      if (days > 14 && days % 7 !== 0) { skipped++; continue; }
+      if (days > 14 && days % 7 !== 0) return false;
 
       let title, bodyText;
       if (days <= 3) {
@@ -144,9 +145,7 @@ export async function GET(req) {
       // Envoie sur les DEUX canaux disponibles (web + Expo mobile).
       if (sub?.endpoint) await sendPushToUser(user.id, title, bodyText, '/');
       if (expoToken) await sendExpoPushToUser(user.id, title, bodyText, { type: 'reminder' });
-      sent++;
-    } catch { skipped++; }
-  }
-
-  return Response.json({ ok: true, sent, skipped, coachAlerts });
+      return true;
+    },
+  });
 }

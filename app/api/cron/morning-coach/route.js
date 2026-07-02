@@ -1,4 +1,5 @@
 import { db, userDb } from '../../db';
+import { runBatchedCron } from '../../../lib/cronBatch';
 import { getUserWithPlan, isPro } from '../../../lib/planServer';
 
 export const maxDuration = 300;
@@ -244,21 +245,11 @@ export async function GET(req) {
     return Response.json({ error: 'Non autorisé' }, { status: 401 });
   }
 
-  const users = await db.get('auth:users') || [];
-  const athletes = users.filter(u => u.role !== 'coach');
-
-  const results = { sent: 0, skipped: 0, errors: 0 };
-
-  for (const user of athletes) {
-    try {
-      const sent = await processMorningCoach(user.id, user.name);
-      if (sent) results.sent++;
-      else results.skipped++;
-    } catch (e) {
-      console.error(`Morning coach error for ${user.id}:`, e.message);
-      results.errors++;
-    }
-  }
-
-  return Response.json({ ok: true, ...results, total: athletes.length });
+  // 1 appel IA potentiel par user → lots courts auto-enchaînés (anti-timeout à l'échelle).
+  return runBatchedCron(req, 'morning-coach', {
+    batch: 15,
+    chunk: 5,
+    filter: (u) => u.role !== 'coach',
+    handler: (user) => processMorningCoach(user.id, user.name),
+  });
 }

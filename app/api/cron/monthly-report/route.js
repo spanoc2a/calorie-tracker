@@ -1,4 +1,5 @@
 import { db, userDb } from '../../db';
+import { runBatchedCron } from '../../../lib/cronBatch';
 import { getUserWithPlan, isPro } from '../../../lib/planServer';
 import { sendExpoPushToUser } from '../../../lib/expoPush';
 
@@ -341,21 +342,11 @@ export async function GET(req) {
     return Response.json({ error: 'Non autorisé' }, { status: 401 });
   }
 
-  const users = await db.get('auth:users') || [];
-  const athletes = users.filter(u => u.role === 'athlete' || u.role === 'Particulier' || !u.role || u.role === 'user');
-
-  const results = { generated: 0, skipped: 0, errors: 0 };
-
-  for (const user of athletes) {
-    try {
-      const entry = await generateMonthlyReport(user.id);
-      if (entry) results.generated++;
-      else results.skipped++;
-    } catch (e) {
-      console.error(`Monthly report error for ${user.id}:`, e.message);
-      results.errors++;
-    }
-  }
-
-  return Response.json({ ok: true, ...results, total: athletes.length });
+  // 1 appel IA par user → lots courts auto-enchaînés (anti-timeout à l'échelle).
+  return runBatchedCron(req, 'monthly-report', {
+    batch: 15,
+    chunk: 5,
+    filter: (u) => u.role === 'athlete' || u.role === 'Particulier' || !u.role || u.role === 'user',
+    handler: (user) => generateMonthlyReport(user.id),
+  });
 }

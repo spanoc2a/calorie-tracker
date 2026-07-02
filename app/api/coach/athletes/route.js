@@ -1,4 +1,5 @@
 import { db, userDb } from '../../../api/db';
+import { getUser, updateUser } from '../../users';
 import { requireAuth } from '../../../api/auth/session';
 import { sendCoachRemovalEmail } from '../../../lib/email';
 import { sendExpoPushToUser } from '../../../lib/expoPush';
@@ -20,35 +21,42 @@ function getLastNDates(n) {
 export async function GET(req) {
   const auth = await requireAuth(req); if (auth.error) return auth.error;
 
-  const users = await db.get('auth:users') || [];
-  const me = users.find(u => u.id === auth.userId);
+  const me = await getUser(auth.userId);
   if (!me || me.role !== 'coach') return Response.json({ error: 'Accès refusé' }, { status: 403 });
 
   const athleteIds = await db.get(`coach:${auth.userId}:athletes`) || [];
   const last7 = getLastNDates(7); // last7[0] = aujourd'hui
 
+  // Anti N+1 : TOUTES les clés de TOUS les athlètes (19/athlète : 10 u:, 7 day:, 1 chat, 1 user)
+  // en une seule lecture batch (db.getMany chunke par 200) au lieu de ~19 requêtes × N athlètes.
+  const SUFFIXES = ['userSettings', 'weightLog', 'stravaCache', 'bloodTests', 'reportRequest',
+    'pendingBloodFiles', 'healthConnectData', 'mediaItems', 'muscuSets', 'checkins'];
+  const allKeys = athleteIds.flatMap(id => [
+    `user:${id}`,
+    ...SUFFIXES.map(s => `u:${id}:${s}`),
+    ...last7.map(d => `u:${id}:day:${d}`),
+    `chat:${auth.userId}:${id}`,
+  ]);
+  const kv = await db.getMany(allKeys);
+
   const athletes = await Promise.all(athleteIds.map(async id => {
-    const user = users.find(u => u.id === id);
+    // Fallback getUser pour les comptes pas encore migrés depuis le blob legacy.
+    const user = kv.get(`user:${id}`) || await getUser(id);
     if (!user) return null;
-    const udb = userDb(id);
 
-    // Budget requêtes : day:today est retiré (last7[0] EST aujourd'hui → réutilise week[0]),
-    // muscuSets + checkins + chat ajoutés → net +2 requêtes par athlète.
-    const [settings, weightLog, stravaCache, bloodTests, reportRequest, pendingBlood, hc, mediaItems, muscuSets, checkins, chatMessages] = await Promise.all([
-      udb.get('userSettings').then(s => s || {}),
-      udb.get('weightLog').then(w => (w || []).slice(-2)),
-      udb.get('stravaCache').then(s => s || null),
-      udb.get('bloodTests').then(b => b || []),
-      udb.get('reportRequest'),
-      udb.get('pendingBloodFiles'),
-      udb.get('healthConnectData').then(h => h || null),
-      udb.get('mediaItems').then(m => m || []),
-      udb.get('muscuSets').then(m => m || null),
-      udb.get('checkins').then(c => c || []),
-      db.get(`chat:${auth.userId}:${id}`).then(c => c || []),
-    ]);
+    const settings = kv.get(`u:${id}:userSettings`) || {};
+    const weightLog = (kv.get(`u:${id}:weightLog`) || []).slice(-2);
+    const stravaCache = kv.get(`u:${id}:stravaCache`) || null;
+    const bloodTests = kv.get(`u:${id}:bloodTests`) || [];
+    const reportRequest = kv.get(`u:${id}:reportRequest`) ?? null;
+    const pendingBlood = kv.get(`u:${id}:pendingBloodFiles`) ?? null;
+    const hc = kv.get(`u:${id}:healthConnectData`) || null;
+    const mediaItems = kv.get(`u:${id}:mediaItems`) || [];
+    const muscuSets = kv.get(`u:${id}:muscuSets`) || null;
+    const checkins = kv.get(`u:${id}:checkins`) || [];
+    const chatMessages = kv.get(`chat:${auth.userId}:${id}`) || [];
 
-    const week = await Promise.all(last7.map(d => udb.get(`day:${d}`).then(e => e || [])));
+    const week = last7.map(d => kv.get(`u:${id}:day:${d}`) || []);
     const activeDays = week.filter(d => d.length > 0);
     const todayEntries = week[0];
     const avgKcal = activeDays.length > 0
@@ -182,8 +190,7 @@ export async function GET(req) {
 // Coach retire un athlète de sa liste
 export async function DELETE(req) {
   const auth = await requireAuth(req); if (auth.error) return auth.error;
-  const users = await db.get('auth:users') || [];
-  const me = users.find(u => u.id === auth.userId);
+  const me = await getUser(auth.userId);
   if (!me || me.role !== 'coach') return Response.json({ error: 'Accès refusé' }, { status: 403 });
 
   const { athleteId } = await req.json();
@@ -191,13 +198,12 @@ export async function DELETE(req) {
   await db.set(`coach:${auth.userId}:athletes`, athleteIds.filter(id => id !== athleteId));
   await userDb(athleteId).set('coachId', null);
 
-  const athlete = users.find(u => u.id === athleteId);
+  const athlete = await getUser(athleteId);
   if (athlete) {
     // L'élève perd l'accès Pro lié au coach → on lui (re)donne 7 jours d'essai Pro
     // pour ne pas couper net, et on l'invite à s'abonner.
     const trialEndsAt = Date.now() + REMOVAL_TRIAL_MS;
-    const updatedUsers = users.map(u => u.id === athleteId ? { ...u, trialEndsAt } : u);
-    await db.set('auth:users', updatedUsers);
+    await updateUser(athleteId, { trialEndsAt });
 
     const adb = userDb(athleteId);
     const notifs = await adb.get('coachNotifications') || [];

@@ -1,5 +1,6 @@
 import { requireAuth } from '../auth/session';
 import { db, userDb } from '../db';
+import { getUser } from '../users';
 
 function lastMonday() {
   const d = new Date();
@@ -33,8 +34,7 @@ export async function POST(req) {
   try {
     const coachId = await userDb(auth.userId).get('coachId');
     if (coachId) {
-      const users = await db.get('auth:users') || [];
-      const athlete = users.find(u => u.id === auth.userId);
+      const athlete = await getUser(auth.userId);
       const name = athlete?.name || 'Un élève';
       const { sendPushToUser } = await import('../push/send/route');
       const { sendExpoPushToUser } = await import('../../lib/expoPush');

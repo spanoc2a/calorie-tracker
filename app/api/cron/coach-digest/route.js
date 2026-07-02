@@ -1,4 +1,5 @@
 import { db, userDb } from '../../db';
+import { runBatchedCron } from '../../../lib/cronBatch';
 import { sendPushToUser } from '../../push/send/route';
 import { sendExpoPushToUser } from '../../../lib/expoPush';
 
@@ -66,16 +67,15 @@ export async function GET(req) {
     return Response.json({ error: 'Non autorisé' }, { status: 401 });
   }
 
-  const users = await db.get('auth:users') || [];
-  const coaches = users.filter(u => u.role === 'coach');
-
-  const results = { sent: 0, skipped: 0, errors: 0 };
   const title = '☀️ Ta journée coach';
 
-  for (const coach of coaches) {
-    try {
+  return runBatchedCron(req, 'coach-digest', {
+    batch: 50,
+    chunk: 5,
+    filter: (u) => u.role === 'coach',
+    handler: async (coach) => {
       const digest = await buildDigest(coach.id);
-      if (!digest) { results.skipped++; continue; }
+      if (!digest) return false;
 
       await Promise.all([
         sendPushToUser(coach.id, title, digest.body, '/coach').catch(() => {}),
@@ -89,12 +89,7 @@ export async function GET(req) {
         ...notifs,
       ].slice(0, 20));
 
-      results.sent++;
-    } catch (e) {
-      console.error(`Coach digest error for ${coach.id}:`, e.message);
-      results.errors++;
-    }
-  }
-
-  return Response.json({ ok: true, ...results, total: coaches.length });
+      return true;
+    },
+  });
 }

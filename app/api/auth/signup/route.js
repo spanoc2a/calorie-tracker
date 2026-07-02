@@ -1,5 +1,6 @@
 import crypto from 'crypto';
 import { db, userDb } from '../../db';
+import { getUser, getUserByEmail, createUser } from '../../users';
 import { sessionCookie, registerSession } from '../session';
 import { rateLimit } from '../../../lib/ratelimit';
 import { sendWelcomeEmail } from '../../../lib/email';
@@ -21,15 +22,14 @@ export async function POST(req) {
   if (password.length < 6) return Response.json({ error: 'Mot de passe trop court (6 caractères minimum)' }, { status: 400 });
   if (name.length > 100) return Response.json({ error: 'Nom trop long' }, { status: 400 });
 
-  const users = await db.get('auth:users') || [];
-  if (users.find(u => u.email === email.toLowerCase())) {
+  if (await getUserByEmail(email)) {
     return Response.json({ error: 'Email déjà utilisé' }, { status: 409 });
   }
 
   const salt = crypto.randomBytes(16).toString('hex');
   const id = crypto.randomUUID();
   const user = { id, email: email.toLowerCase(), name, role, salt, passwordHash: hashPassword(password, salt), iterations: ITERATIONS, createdAt: Date.now(), cguAcceptedAt, trialEndsAt: Date.now() + 7 * 24 * 3600 * 1000 };
-  await db.set('auth:users', [...users, user]);
+  await createUser(user);
 
   const token = crypto.randomUUID();
   await db.set(`session:${token}`, { userId: id, email: user.email, name, role, expiresAt: Date.now() + 90 * 24 * 3600 * 1000 });
@@ -46,7 +46,7 @@ export async function POST(req) {
         const athletes = await db.get(`coach:${pending.coachId}:athletes`) || [];
         if (!athletes.includes(id)) await db.set(`coach:${pending.coachId}:athletes`, [...athletes, id]);
         await db.del(`coach:emailInvite:${user.email}`);
-        const coach = users.find(u => u.id === pending.coachId);
+        const coach = await getUser(pending.coachId);
         coachName = coach?.name || 'ton coach';
       }
     } catch {}

@@ -1,4 +1,5 @@
 import { db, userDb } from '../../db';
+import { getUser } from '../../users';
 
 export async function GET(req) {
   const cookieHeader = req.headers.get('cookie') || '';
@@ -11,14 +12,12 @@ export async function GET(req) {
   if (viewAs) {
     const athleteIds = await db.get(`coach:${session.userId}:athletes`) || [];
     if (athleteIds.includes(viewAs)) {
-      const users = await db.get('auth:users') || [];
-      const athlete = users.find(u => u.id === viewAs);
+      const athlete = await getUser(viewAs);
       return Response.json({ user: { id: viewAs, email: athlete?.email, name: athlete?.name, role: 'athlete', isViewAs: true, coachId: session.userId } });
     }
   }
 
-  const users = await db.get('auth:users') || [];
-  const u = users.find(u => u.id === session.userId);
+  const u = await getUser(session.userId);
 
   const ownerPlan = { 'pizzachezcyrilajaccio@gmail.com': 'pro', 'spanocyril22@gmail.com': 'coach_pro' }[u?.email ?? session.email];
   const hasPaidPlan = u?.plan && u.plan !== 'free' && u?.planExpiresAt && Date.now() < u.planExpiresAt;

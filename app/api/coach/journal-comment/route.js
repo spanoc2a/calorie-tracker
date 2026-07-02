@@ -1,12 +1,12 @@
 import { db, userDb } from '../../db';
+import { getUser } from '../../users';
 import { requireAuth } from '../../auth/session';
 
 async function verifyCoach(req) {
   const auth = await requireAuth(req); if (auth.error) return { error: auth.error };
-  const users = await db.get('auth:users') || [];
-  const me = users.find(u => u.id === auth.userId);
+  const me = await getUser(auth.userId);
   if (!me || me.role !== 'coach') return { error: Response.json({ error: 'Accès refusé' }, { status: 403 }) };
-  return { coachId: auth.userId, users };
+  return { coachId: auth.userId, me };
 }
 
 // Récupérer un commentaire de journal du coach pour un athlète et une date
@@ -43,7 +43,7 @@ export async function POST(req) {
 
   // Prévenir l'athlète (notif in-app + push) — sinon il ne voit jamais le commentaire.
   try {
-    const coach = v.users.find(u => u.id === v.coachId);
+    const coach = v.me;
     const udb = userDb(athleteId);
     const notifs = await udb.get('coachNotifications') || [];
     await udb.set('coachNotifications', [{

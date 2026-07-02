@@ -206,8 +206,7 @@ export async function POST(req) {
   await udb.set('bloodTests', [result, ...existing].slice(0, 10));
 
   if (coachId) {
-    const users = await import('../db').then(m => m.db.get('auth:users')).then(u => u || []);
-    const athlete = users.find(u => u.id === auth.userId);
+    const athlete = await import('../users').then(m => m.getUser(auth.userId));
     import('../push/send/route').then(m =>
       m.sendPushToUser(coachId, '🩸 Nouveau bilan sanguin', `${athlete?.name || 'Un athlète'} a envoyé un bilan à analyser`, '/coach')
     ).catch(() => {});

@@ -1,5 +1,6 @@
 import crypto from 'crypto';
 import { db } from '../../db';
+import { getUserByEmail, getUser, updateUser } from '../../users';
 import { revokeAllSessions } from '../session';
 import { rateLimit } from '../../../lib/ratelimit';
 import { sendResetEmail } from '../../../lib/email';
@@ -18,8 +19,7 @@ export async function POST(req) {
   const { email } = await req.json();
   if (!email) return Response.json({ error: 'Email requis' }, { status: 400 });
 
-  const users = await db.get('auth:users') || [];
-  const user = users.find(u => u.email === email.toLowerCase().trim());
+  const user = await getUserByEmail(email);
 
   if (!user) return Response.json({ ok: true });
 
@@ -47,13 +47,11 @@ export async function PUT(req) {
     return Response.json({ error: 'Lien expiré ou invalide' }, { status: 400 });
   }
 
-  const users = await db.get('auth:users') || [];
-  const idx = users.findIndex(u => u.id === reset.userId);
-  if (idx === -1) return Response.json({ error: 'Compte introuvable' }, { status: 404 });
+  const account = await getUser(reset.userId);
+  if (!account) return Response.json({ error: 'Compte introuvable' }, { status: 404 });
 
   const salt = crypto.randomBytes(16).toString('hex');
-  users[idx] = { ...users[idx], salt, passwordHash: hashPassword(password, salt), iterations: ITERATIONS };
-  await db.set('auth:users', users);
+  await updateUser(reset.userId, { salt, passwordHash: hashPassword(password, salt), iterations: ITERATIONS });
   await db.del(`reset:${token}`);
 
   // Révoque toutes les sessions connues de l'utilisateur (mot de passe compromis ?).

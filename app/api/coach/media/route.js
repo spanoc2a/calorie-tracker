@@ -1,11 +1,11 @@
 import { db, userDb } from '../../db';
+import { getUser } from '../../users';
 import { requireAuth } from '../../auth/session';
 import { signRead } from '../../../lib/storage';
 
 async function requireCoachAthlete(req, athleteId) {
   const auth = await requireAuth(req); if (auth.error) return { error: auth.error };
-  const users = await db.get('auth:users') || [];
-  const me = users.find(u => u.id === auth.userId);
+  const me = await getUser(auth.userId);
   if (!me || me.role !== 'coach') return { error: Response.json({ error: 'Accès refusé' }, { status: 403 }) };
   if (athleteId) {
     const list = await db.get(`coach:${auth.userId}:athletes`) || [];

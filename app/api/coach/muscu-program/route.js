@@ -1,4 +1,5 @@
 import { db, userDb } from '../../../api/db';
+import { getUser } from '../../users';
 import { requireAuth } from '../../../api/auth/session';
 import { getHealthContext, buildStravaContext } from '../../../lib/healthContext';
 
@@ -14,10 +15,9 @@ function extractJSON(text) {
 
 async function verifyCoach(req) {
   const auth = await requireAuth(req); if (auth.error) return { error: auth.error };
-  const users = await db.get('auth:users') || [];
-  const me = users.find(u => u.id === auth.userId);
+  const me = await getUser(auth.userId);
   if (!me || me.role !== 'coach') return { error: Response.json({ error: 'Accès refusé' }, { status: 403 }) };
-  return { coachId: auth.userId, users };
+  return { coachId: auth.userId, me };
 }
 
 export async function POST(req) {
@@ -27,7 +27,7 @@ export async function POST(req) {
   const athleteIds = await db.get(`coach:${v.coachId}:athletes`) || [];
   if (!athleteIds.includes(athleteId)) return Response.json({ error: 'Athlète non lié' }, { status: 403 });
 
-  const athlete = v.users.find(u => u.id === athleteId);
+  const athlete = await getUser(athleteId);
   if (!athlete) return Response.json({ error: 'Athlète introuvable' }, { status: 404 });
 
   let program;
@@ -123,7 +123,7 @@ export async function PATCH(req) {
     : p);
   await udb.set('coachMuscuPrograms', updated);
 
-  const coach = v.users.find(u => u.id === v.coachId);
+  const coach = v.me;
   const notifs = await udb.get('coachNotifications') || [];
   await udb.set('coachNotifications', [{ id: Date.now(), date: new Date().toISOString(), coachName: coach?.name || 'Ton coach', type: 'muscuProgram', read: false }, ...notifs].slice(0, 20));
 

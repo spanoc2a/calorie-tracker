@@ -1,4 +1,5 @@
 import { db, userDb } from '../../db';
+import { getUser, deleteUser } from '../../users';
 import { requireAuth } from '../../auth/session';
 
 // Profil coach : logo (marque blanche rapports), bio, spécialité + gestion du compte.
@@ -19,10 +20,9 @@ function validLogo(dataUrl) {
 
 async function requireCoach(req) {
   const auth = await requireAuth(req); if (auth.error) return { error: auth.error };
-  const users = await db.get('auth:users') || [];
-  const me = users.find(u => u.id === auth.userId);
+  const me = await getUser(auth.userId);
   if (!me || me.role !== 'coach') return { error: Response.json({ error: 'Accès refusé' }, { status: 403 }) };
-  return { coachId: auth.userId, me, users };
+  return { coachId: auth.userId, me };
 }
 
 export async function GET(req) {
@@ -78,9 +78,8 @@ export async function DELETE(req) {
   await db.del(`coach:${v.coachId}:athletes`);
   await userDb(v.coachId).del('coachProfile');
 
-  // Retirer le coach du tableau global des utilisateurs
-  const users = await db.get('auth:users') || [];
-  await db.set('auth:users', users.filter(u => u.id !== v.coachId));
+  // Retirer le coach du magasin users (gère aussi blob legacy + index email).
+  await deleteUser(v.coachId);
 
   return Response.json({ ok: true });
 }

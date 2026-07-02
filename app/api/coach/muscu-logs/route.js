@@ -1,4 +1,5 @@
 import { db, userDb } from '../../db';
+import { getUser } from '../../users';
 import { requireAuth } from '../../auth/session';
 
 // Logs de musculation réellement enregistrés par l'athlète, vus par le coach.
@@ -6,8 +7,7 @@ import { requireAuth } from '../../auth/session';
 // On agrège en séances (par date, la plus récente d'abord).
 export async function GET(req) {
   const auth = await requireAuth(req); if (auth.error) return auth.error;
-  const users = await db.get('auth:users') || [];
-  const me = users.find(u => u.id === auth.userId);
+  const me = await getUser(auth.userId);
   if (!me || me.role !== 'coach') return Response.json({ error: 'Accès refusé' }, { status: 403 });
 
   const { searchParams } = new URL(req.url);

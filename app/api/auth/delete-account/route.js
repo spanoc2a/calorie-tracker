@@ -1,6 +1,7 @@
 import crypto from 'crypto';
 import { createClient } from '@supabase/supabase-js';
 import { db, userDb } from '../../db';
+import { getUser, deleteUser } from '../../users';
 import { requireAuth, revokeAllSessions } from '../session';
 import { BUCKET, removeFiles } from '../../../lib/storage';
 
@@ -41,8 +42,7 @@ export async function DELETE(req) {
   const { password } = await req.json().catch(() => ({}));
   if (!password) return Response.json({ error: 'Mot de passe requis' }, { status: 400 });
 
-  const users = await db.get('auth:users') || [];
-  const user = users.find(u => u.id === auth.userId);
+  const user = await getUser(auth.userId);
   if (!user || hashPassword(password, user.salt, user.iterations || ITERATIONS) !== user.passwordHash) {
     return Response.json({ error: 'Mot de passe incorrect' }, { status: 401 });
   }
@@ -81,8 +81,8 @@ export async function DELETE(req) {
     await db.set('media:videoIndex', videoIndex.filter(x => x.athleteId !== userId));
   }
 
-  // 5. Retirer de auth:users.
-  await db.set('auth:users', users.filter(u => u.id !== userId));
+  // 5. Retirer du magasin users (gère aussi le retrait du blob legacy et de l'index email).
+  await deleteUser(userId);
 
   // 6. Révoquer toutes les sessions connues.
   await revokeAllSessions(userId);

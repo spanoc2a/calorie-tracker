@@ -1,4 +1,5 @@
 import { db, userDb } from '../../../api/db';
+import { getUser } from '../../users';
 import { requireAuth } from '../../../api/auth/session';
 import { getHealthContext, buildStravaContext } from '../../../lib/healthContext';
 import { rateLimit } from '../../../lib/ratelimit';
@@ -38,15 +39,14 @@ export async function POST(req) {
   }
   const lang = detectLang(req);
 
-  const users = await db.get('auth:users') || [];
-  const me = users.find(u => u.id === auth.userId);
+  const me = await getUser(auth.userId);
   if (!me || me.role !== 'coach') return Response.json({ error: 'Accès refusé' }, { status: 403 });
 
   const { athleteId, days = 30 } = await req.json();
   const athleteIds = await db.get(`coach:${auth.userId}:athletes`) || [];
   if (!athleteIds.includes(athleteId)) return Response.json({ error: 'Athlète non lié' }, { status: 403 });
 
-  const athlete = users.find(u => u.id === athleteId);
+  const athlete = await getUser(athleteId);
   if (!athlete) return Response.json({ error: 'Athlète introuvable' }, { status: 404 });
 
   const udb = userDb(athleteId);
@@ -300,8 +300,7 @@ ${structureSections}`;
 
 export async function GET(req) {
   const auth = await requireAuth(req); if (auth.error) return auth.error;
-  const users = await db.get('auth:users') || [];
-  const me = users.find(u => u.id === auth.userId);
+  const me = await getUser(auth.userId);
   if (!me || me.role !== 'coach') return Response.json({ report: null });
   const key = `coach:latestReport:${auth.userId}`;
   const report = await db.get(key);
@@ -312,15 +311,14 @@ export async function GET(req) {
 
 export async function PATCH(req) {
   const auth = await requireAuth(req); if (auth.error) return auth.error;
-  const users = await db.get('auth:users') || [];
-  const me = users.find(u => u.id === auth.userId);
+  const me = await getUser(auth.userId);
   if (!me || me.role !== 'coach') return Response.json({ error: 'Accès refusé' }, { status: 403 });
 
   const { athleteId, html } = await req.json();
   const athleteIds = await db.get(`coach:${auth.userId}:athletes`) || [];
   if (!athleteIds.includes(athleteId)) return Response.json({ error: 'Athlète non lié' }, { status: 403 });
 
-  const athlete = users.find(u => u.id === athleteId);
+  const athlete = await getUser(athleteId);
   const udb = userDb(athleteId);
   const history = await udb.get('reportHistory') || [];
 

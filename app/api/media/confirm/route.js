@@ -1,4 +1,5 @@
 import { db, userDb } from '../../db';
+import { getUser } from '../../users';
 import { requireAuth } from '../../auth/session';
 
 // L'élève confirme l'upload terminé → enregistre les métadonnées + notifie le coach.
@@ -41,8 +42,7 @@ export async function POST(req) {
   const coachId = await udb.get('coachId');
   if (coachId) {
     try {
-      const users = await db.get('auth:users') || [];
-      const me = users.find(u => u.id === auth.userId);
+      const me = await getUser(auth.userId);
       const { sendPushToUser } = await import('../../push/send/route');
       const { sendExpoPushToUser } = await import('../../../lib/expoPush');
       const label = item.type === 'video' ? '🎥 Vidéo' : '📸 Photo';

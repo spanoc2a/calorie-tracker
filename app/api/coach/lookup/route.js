@@ -1,4 +1,5 @@
 import { db } from '../../../api/db';
+import { getUser } from '../../users';
 import { rateLimit } from '../../../lib/ratelimit';
 
 export async function GET(req) {
@@ -24,8 +25,7 @@ export async function GET(req) {
   const coachId = await db.get(`coach:invite:${code.toUpperCase()}`);
   if (!coachId) return Response.json({ error: 'Lien invalide' }, { status: 404 });
 
-  const users = await db.get('auth:users') || [];
-  const coach = users.find(u => u.id === coachId);
+  const coach = await getUser(coachId);
   if (!coach) return Response.json({ error: 'Nutritionniste introuvable' }, { status: 404 });
 
   return Response.json({ coachId, coachName: coach.name });

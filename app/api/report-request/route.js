@@ -1,4 +1,5 @@
 import { userDb, db } from '../db';
+import { getUser } from '../users';
 import { requireAuth } from '../auth/session';
 
 export async function POST(req) {
@@ -10,8 +11,7 @@ export async function POST(req) {
   try {
     const coachId = await udb.get('coachId');
     if (coachId) {
-      const users = await db.get('auth:users') || [];
-      const athlete = users.find(u => u.id === auth.userId);
+      const athlete = await getUser(auth.userId);
       const { sendPushToUser } = await import('../push/send/route');
       await sendPushToUser(coachId, `📄 Demande de bilan`, `${athlete?.name || 'Un patient'} demande un rapport nutritionnel`, '/coach');
     }

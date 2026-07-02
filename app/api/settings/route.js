@@ -1,4 +1,5 @@
 import { db, userDb } from '../db';
+import { getUser } from '../users';
 import { requireAuth } from '../auth/session';
 
 // selfNutritionAllowed / selfMuscuAllowed ne sont PAS dans les défauts : ils sont renvoyés
@@ -22,8 +23,7 @@ export async function GET(req) {
   // Nom du coach (pour l'en-tête de la messagerie athlète) — lookup seulement si rattaché.
   let coachName = null;
   if (coachId) {
-    const users = await db.get('auth:users') || [];
-    coachName = users.find(u => u.id === coachId)?.name || null;
+    coachName = (await getUser(coachId))?.name || null;
   }
   return Response.json({ settings: { ...DEFAULTS, ...settings, coachId: coachId || null, coachName } });
 }

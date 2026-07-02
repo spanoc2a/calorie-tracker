@@ -1,5 +1,6 @@
 import crypto from 'crypto';
 import { db } from '../../db';
+import { getUserByEmail, updateUser, listUsers } from '../../users';
 import { sendSubscriptionEmail, sendCancellationEmail } from '../../../lib/email';
 
 const PLAN_MAP = {
@@ -72,9 +73,8 @@ export async function POST(req) {
     const planInfo = planFromPaymentLink(paymentLink);
     if (!planInfo) return Response.json({ ok: true });
 
-    const users = await db.get('auth:users') || [];
-    const idx = users.findIndex(u => (u.email || '').toLowerCase().trim() === email);
-    if (idx === -1) {
+    const user = await getUserByEmail(email);
+    if (!user) {
       console.warn('[STRIPE] checkout.session.completed: aucun user pour', email);
       return Response.json({ ok: true });
     }
@@ -83,18 +83,16 @@ export async function POST(req) {
       ? Date.now() + 365 * 24 * 3600 * 1000
       : Date.now() + 31 * 24 * 3600 * 1000;
 
-    users[idx] = {
-      ...users[idx],
+    const updated = await updateUser(user.id, {
       plan: planInfo.plan,
       planBilling: planInfo.billing,
       planStart: Date.now(),
       planExpiresAt: expiresAt,
       stripeCustomerId: session.customer,
       stripeSessionId: session.id,
-    };
-    if (planInfo.plan.startsWith('coach')) users[idx].role = 'coach';
-    await db.set('auth:users', users);
-    sendSubscriptionEmail(users[idx].email, users[idx].name, planInfo.plan, planInfo.billing).catch(() => {});
+      ...(planInfo.plan.startsWith('coach') ? { role: 'coach' } : {}),
+    });
+    sendSubscriptionEmail(updated.email, updated.name, planInfo.plan, planInfo.billing).catch(() => {});
   }
 
   if (event.type === 'invoice.payment_succeeded') {
@@ -104,24 +102,18 @@ export async function POST(req) {
     const customerId = invoice.customer;
     const periodEnd = invoice.lines?.data?.[0]?.period?.end;
     if (!customerId || !periodEnd) return Response.json({ ok: true });
-    const users = await db.get('auth:users') || [];
-    const idx = users.findIndex(u => u.stripeCustomerId === customerId);
-    if (idx !== -1) {
-      users[idx] = { ...users[idx], planExpiresAt: periodEnd * 1000 };
-      await db.set('auth:users', users);
-    }
+    // Lookup par stripeCustomerId : événement rare → scan acceptable.
+    const user = (await listUsers()).find(u => u.stripeCustomerId === customerId);
+    if (user) await updateUser(user.id, { planExpiresAt: periodEnd * 1000 });
   }
 
   if (event.type === 'customer.subscription.deleted') {
     const sub = event.data.object;
     const customerId = sub.customer;
-    const users = await db.get('auth:users') || [];
-    const idx = users.findIndex(u => u.stripeCustomerId === customerId);
-    if (idx !== -1) {
-      const u = users[idx];
-      users[idx] = { ...u, plan: 'free', planBilling: null, planExpiresAt: null };
-      await db.set('auth:users', users);
-      sendCancellationEmail(u.email, u.name).catch(() => {});
+    const user = (await listUsers()).find(u => u.stripeCustomerId === customerId);
+    if (user) {
+      await updateUser(user.id, { plan: 'free', planBilling: null, planExpiresAt: null });
+      sendCancellationEmail(user.email, user.name).catch(() => {});
     }
   }
 

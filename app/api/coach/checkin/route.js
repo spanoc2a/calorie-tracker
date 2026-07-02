@@ -1,12 +1,12 @@
 import { db, userDb } from '../../db';
+import { getUser } from '../../users';
 import { requireAuth } from '../../auth/session';
 
 async function verifyCoach(req) {
   const auth = await requireAuth(req); if (auth.error) return { error: auth.error };
-  const users = await db.get('auth:users') || [];
-  const me = users.find(u => u.id === auth.userId);
+  const me = await getUser(auth.userId);
   if (!me || me.role !== 'coach') return { error: Response.json({ error: 'Accès refusé' }, { status: 403 }) };
-  return { coachId: auth.userId, users };
+  return { coachId: auth.userId };
 }
 
 // Récupérer les check-ins d'un athlète lié au coach
