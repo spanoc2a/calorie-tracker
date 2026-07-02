@@ -2,6 +2,25 @@
 import { useState, useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
 import { sanitizeHtml } from "../lib/sanitize";
+import { EXERCISE_NAMES } from "../lib/exerciseNames";
+
+// Questionnaire check-in standard (identique au défaut backend / champs legacy).
+const DEFAULT_CHECKIN_QUESTIONS = [
+  { id: 'mood', label: 'Humeur', type: 'scale' },
+  { id: 'energy', label: 'Énergie', type: 'scale' },
+  { id: 'sleep', label: 'Sommeil (heures)', type: 'number' },
+  { id: 'weight', label: 'Poids (kg)', type: 'number' },
+  { id: 'notes', label: 'Notes', type: 'text' },
+];
+
+// Génère un id slug (a-z0-9_) unique depuis un label.
+function slugifyId(label, existing) {
+  const base = (label || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '')
+    .replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '').slice(0, 40) || 'question';
+  let id = base, n = 2;
+  while (existing.includes(id)) id = `${base}_${n++}`;
+  return id;
+}
 
 // Petite stat de récupération (santé objet connecté) affichée dans la carte athlète.
 function RecStat({ label, value }) {
@@ -27,6 +46,88 @@ function Ed({ value, onChange, style, block }) {
         minWidth: 16, display: block ? "block" : "inline-block", ...style,
       }}
     >{value}</span>
+  );
+}
+
+// Interrupteur DS (or = actif) — utilisé pour l'autonomie élève et les automations.
+function ToggleSwitch({ on, onToggle, disabled }) {
+  return (
+    <button onClick={onToggle} disabled={disabled} role="switch" aria-checked={on}
+      style={{ width: 42, height: 23, borderRadius: 999, border: `1px solid ${on ? "var(--gold)" : "var(--line)"}`,
+        background: on ? "#3a2f1a" : "var(--sunk)", position: "relative", cursor: disabled ? "not-allowed" : "pointer",
+        transition: ".18s", padding: 0, flexShrink: 0, opacity: disabled ? 0.5 : 1 }}>
+      <span style={{ position: "absolute", top: 2, left: on ? 21 : 2, width: 17, height: 17, borderRadius: "50%",
+        background: on ? "var(--gold)" : "var(--txt-4)", transition: "left .18s" }}/>
+    </button>
+  );
+}
+
+// Champ nom d'exercice avec autocomplétion (noms canoniques FR → démo visuelle
+// garantie dans l'app de l'élève). Remplace Ed UNIQUEMENT pour ce champ :
+// <input> contrôlé localement + dropdown maison (max 6, insensible accents/casse),
+// remonte au state au blur ou au clic, exactement comme le blur d'Ed.
+function ExoNameInput({ value, onChange, style }) {
+  const [val, setVal] = useState(value ?? '');
+  const [open, setOpen] = useState(false);
+  useEffect(() => { setVal(value ?? ''); }, [value]);
+  const norm = s => (s || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '');
+  const q = norm(val.trim());
+  const matches = open && q.length >= 1
+    ? EXERCISE_NAMES.filter(n => norm(n).includes(q) && norm(n) !== q).slice(0, 6)
+    : [];
+  const commit = v => { if (v !== (value ?? '')) onChange(v); };
+  return (
+    <span style={{ position: "relative", display: "inline-block", flex: 1, minWidth: 0 }}>
+      <input value={val}
+        onChange={e => { setVal(e.target.value); setOpen(true); }}
+        onFocus={() => setOpen(true)}
+        onBlur={() => { setOpen(false); commit(val); }}
+        placeholder="Nom de l'exercice…"
+        style={{ background: "transparent", border: "none", borderBottom: "1px dashed #3a3a2a", outline: "none",
+          width: "100%", padding: 0, fontFamily: "var(--sans)", ...style }}/>
+      {matches.length > 0 && (
+        <div style={{ position: "absolute", top: "100%", left: 0, zIndex: 40, minWidth: 230, maxWidth: 320, marginTop: 4,
+          background: "var(--panel)", border: "1px solid var(--line-gold)", borderRadius: "var(--r-sm)",
+          boxShadow: "var(--sh-pop)", overflow: "hidden" }}>
+          {matches.map(n => (
+            <div key={n}
+              onMouseDown={e => { e.preventDefault(); setVal(n); commit(n); setOpen(false); }}
+              onMouseEnter={e => { e.currentTarget.style.background = "#1a1815"; }}
+              onMouseLeave={e => { e.currentTarget.style.background = "transparent"; }}
+              style={{ padding: "8px 13px", fontSize: "13px", color: "var(--txt)", cursor: "pointer", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+              {n}
+            </div>
+          ))}
+        </div>
+      )}
+    </span>
+  );
+}
+
+// Sélection de destinataires : « Tous mes élèves » ou liste de cases.
+// Réutilisé par le message groupé et les messages programmés.
+function AthletePicker({ athletes, all, onAllChange, selected, onChange }) {
+  return (
+    <div>
+      <label style={{ display: "flex", alignItems: "center", gap: 9, fontSize: "13.5px", color: "var(--txt)", cursor: "pointer", marginBottom: all ? 0 : 10 }}>
+        <input type="checkbox" checked={all} onChange={e => onAllChange(e.target.checked)}
+          style={{ accentColor: "#c8b890", width: 15, height: 15, cursor: "pointer" }}/>
+        Tous mes élèves
+      </label>
+      {!all && (
+        <div className="cx-inner cx-scroll" style={{ padding: "10px 14px", maxHeight: 180, overflowY: "auto" }}>
+          {athletes.length === 0 && <div style={{ fontSize: "12.5px", color: "var(--txt-4)" }}>Aucun élève lié.</div>}
+          {athletes.map(a => (
+            <label key={a.id} style={{ display: "flex", alignItems: "center", gap: 9, fontSize: "13px", color: "var(--txt-2)", cursor: "pointer", padding: "5px 0" }}>
+              <input type="checkbox" checked={selected.includes(a.id)}
+                onChange={e => onChange(e.target.checked ? [...selected, a.id] : selected.filter(x => x !== a.id))}
+                style={{ accentColor: "#c8b890", width: 15, height: 15, cursor: "pointer" }}/>
+              {a.name}
+            </label>
+          ))}
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -135,8 +236,32 @@ export default function CoachDashboard() {
   const [chatInput, setChatInput] = useState('');
   const [chatSending, setChatSending] = useState(false);
   const [chatUnread, setChatUnread] = useState({}); // { athleteId: count }
-  const [view, setView] = useState('athletes'); // 'athletes' | 'messages' — bascule du dashboard
+  const [view, setView] = useState('athletes'); // 'athletes' | 'messages' | 'outils' | 'profil' — bascule du dashboard
   const [notifPermission, setNotifPermission] = useState('default');
+
+  // Message groupé (broadcast à tous / une sélection d'élèves)
+  const [broadcastOpen, setBroadcastOpen] = useState(false);
+  const [broadcastText, setBroadcastText] = useState('');
+  const [broadcastAll, setBroadcastAll] = useState(true);
+  const [broadcastIds, setBroadcastIds] = useState([]);
+  const [broadcastSending, setBroadcastSending] = useState(false);
+  const [broadcastResult, setBroadcastResult] = useState(null); // { ok, text }
+
+  // Outils — check-in personnalisé (aussi utilisé pour libeller les réponses dans la fiche)
+  const [checkinQuestions, setCheckinQuestions] = useState(null); // null = pas encore chargé
+  const [checkinSaving, setCheckinSaving] = useState(false);
+  const [checkinMsg, setCheckinMsg] = useState(null); // { ok, text }
+
+  // Outils — automations (séquence de bienvenue + messages programmés)
+  const [automations, setAutomations] = useState(null); // null = pas encore chargé
+  const [welcomeSaving, setWelcomeSaving] = useState(false);
+  const [welcomeMsg, setWelcomeMsg] = useState(null);
+  const [schedText, setSchedText] = useState('');
+  const [schedDate, setSchedDate] = useState('');
+  const [schedAll, setSchedAll] = useState(true);
+  const [schedIds, setSchedIds] = useState([]);
+  const [schedSaving, setSchedSaving] = useState(false);
+  const [schedMsg, setSchedMsg] = useState(null);
 
   // Menu « Mon compte » coach (logo marque blanche, profil, gestion compte)
   const [profile, setProfile] = useState(null);
@@ -350,6 +475,13 @@ export default function CoachDashboard() {
       setNotifPermission(Notification.permission);
     }
   }, []);
+
+  // Charger le questionnaire check-in dès la connexion : il sert aussi à
+  // libeller les réponses personnalisées dans les fiches athlètes.
+  useEffect(() => {
+    if (!user) return;
+    loadCheckinTemplate();
+  }, [user]);
 
   // Vérifier rapport coach non vu (app était fermée pendant génération)
   useEffect(() => {
@@ -826,6 +958,152 @@ export default function CoachDashboard() {
     setJournalCommentInput(prev => ({ ...prev, [key]: '' }));
   }
 
+  // ── Message groupé ──────────────────────────────────────────────────────────
+  async function sendBroadcast() {
+    const text = broadcastText.trim();
+    if (!text || broadcastSending) return;
+    if (!broadcastAll && broadcastIds.length === 0) { setBroadcastResult({ ok:false, text:'Sélectionne au moins un élève.' }); return; }
+    setBroadcastSending(true); setBroadcastResult(null);
+    try {
+      const body = broadcastAll ? { text } : { text, athleteIds: broadcastIds };
+      const r = await fetch('/api/coach/broadcast', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body) });
+      const d = await r.json().catch(() => ({}));
+      if (r.ok) {
+        const n = d.sent ?? 0;
+        setBroadcastResult({ ok:true, text:`✓ Envoyé à ${n} élève${n>1?'s':''}` });
+        setBroadcastText('');
+      } else if (r.status === 429) {
+        setBroadcastResult({ ok:false, text: 'Doucement — tu viens déjà d\'envoyer un message groupé. Réessaie dans quelques minutes.' });
+      } else {
+        setBroadcastResult({ ok:false, text: d.error || 'Envoi impossible. Réessaie.' });
+      }
+    } catch { setBroadcastResult({ ok:false, text:'Erreur réseau. Vérifie ta connexion et réessaie.' }); }
+    setBroadcastSending(false);
+  }
+
+  // ── Autonomie de l'élève (peut générer ses programmes) ─────────────────────
+  // PATCH optimiste : on bascule tout de suite, on revient en arrière si le serveur refuse.
+  async function toggleAutonomy(athleteId, field, next) {
+    setAthletes(prev => prev.map(x => x.id === athleteId ? { ...x, [field]: next } : x));
+    try {
+      const r = await fetch('/api/coach/athlete', { method:'PATCH', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ athleteId, [field]: next }) });
+      if (!r.ok) throw new Error();
+    } catch {
+      setAthletes(prev => prev.map(x => x.id === athleteId ? { ...x, [field]: !next } : x));
+    }
+  }
+
+  // ── Check-in personnalisé ───────────────────────────────────────────────────
+  async function loadCheckinTemplate() {
+    try {
+      const r = await fetch('/api/coach/checkin-template');
+      if (!r.ok) return;
+      const d = await r.json();
+      if (Array.isArray(d.questions)) setCheckinQuestions(d.questions);
+    } catch {}
+  }
+
+  async function saveCheckinTemplate() {
+    const qs = (checkinQuestions || []).map(q => ({ ...q, label: (q.label || '').trim() })).filter(q => q.label);
+    if (qs.length === 0) { setCheckinMsg({ ok:false, text:'Ajoute au moins une question.' }); return; }
+    // Conserve les ids existants (les réponses passées y sont liées), génère un slug unique pour les nouvelles.
+    const ids = [];
+    const withIds = qs.map(q => {
+      const id = (q.id && /^[a-z0-9_]+$/.test(q.id) && !ids.includes(q.id)) ? q.id : slugifyId(q.label, ids);
+      ids.push(id);
+      return { id, label: q.label.slice(0, 120), type: q.type };
+    });
+    setCheckinSaving(true); setCheckinMsg(null);
+    try {
+      const r = await fetch('/api/coach/checkin-template', { method:'PATCH', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ questions: withIds }) });
+      const d = await r.json().catch(() => ({}));
+      if (r.ok) { setCheckinQuestions(Array.isArray(d.questions) ? d.questions : withIds); setCheckinMsg({ ok:true, text:'✓ Questionnaire enregistré' }); }
+      else setCheckinMsg({ ok:false, text: d.error || 'Enregistrement impossible. Réessaie.' });
+    } catch { setCheckinMsg({ ok:false, text:'Erreur réseau. Réessaie.' }); }
+    setCheckinSaving(false);
+  }
+
+  async function restoreCheckinDefault() {
+    setCheckinSaving(true); setCheckinMsg(null);
+    try {
+      const r = await fetch('/api/coach/checkin-template', { method:'PATCH', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ questions: DEFAULT_CHECKIN_QUESTIONS }) });
+      const d = await r.json().catch(() => ({}));
+      if (r.ok) { setCheckinQuestions(Array.isArray(d.questions) ? d.questions : DEFAULT_CHECKIN_QUESTIONS); setCheckinMsg({ ok:true, text:'✓ Questionnaire standard rétabli' }); }
+      else setCheckinMsg({ ok:false, text: d.error || 'Impossible de rétablir. Réessaie.' });
+    } catch { setCheckinMsg({ ok:false, text:'Erreur réseau. Réessaie.' }); }
+    setCheckinSaving(false);
+  }
+
+  // ── Automations ─────────────────────────────────────────────────────────────
+  async function loadAutomations() {
+    try {
+      const r = await fetch('/api/coach/automations');
+      if (!r.ok) return;
+      const d = await r.json();
+      if (d.automations) setAutomations(d.automations);
+    } catch {}
+  }
+
+  // PATCH générique : renvoie les automations à jour, ou null si échec.
+  async function patchAutomations(body) {
+    try {
+      const r = await fetch('/api/coach/automations', { method:'PATCH', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body) });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) return null;
+      if (d.automations) setAutomations(d.automations);
+      return d;
+    } catch { return null; }
+  }
+
+  // Steps propres pour le PATCH : dayOffset entier ≥ 0, texte non vide.
+  function cleanWelcomeSteps(steps) {
+    return (steps || [])
+      .map(s => ({ dayOffset: Math.max(0, Math.round(Number(s.dayOffset) || 0)), text: (s.text || '').trim() }))
+      .filter(s => s.text);
+  }
+
+  async function toggleWelcome() {
+    const w = automations?.welcome;
+    if (!w || welcomeSaving) return;
+    setWelcomeMsg(null);
+    const d = await patchAutomations({ welcome: { enabled: !w.enabled, steps: cleanWelcomeSteps(w.steps) } });
+    if (!d) setWelcomeMsg({ ok:false, text:'Modification impossible. Réessaie.' });
+  }
+
+  function editWelcomeStep(i, field, value) {
+    setAutomations(prev => ({ ...prev, welcome: { ...prev.welcome, steps: prev.welcome.steps.map((s, j) => j === i ? { ...s, [field]: value } : s) } }));
+  }
+
+  async function saveWelcome() {
+    const w = automations?.welcome;
+    if (!w || welcomeSaving) return;
+    const steps = cleanWelcomeSteps(w.steps);
+    if (steps.length === 0) { setWelcomeMsg({ ok:false, text:'Écris au moins un message.' }); return; }
+    setWelcomeSaving(true); setWelcomeMsg(null);
+    const d = await patchAutomations({ welcome: { enabled: !!w.enabled, steps } });
+    setWelcomeMsg(d ? { ok:true, text:'✓ Séquence enregistrée' } : { ok:false, text:'Enregistrement impossible. Réessaie.' });
+    setWelcomeSaving(false);
+  }
+
+  async function addScheduled() {
+    const text = schedText.trim();
+    if (schedSaving) return;
+    if (!text || !schedDate) { setSchedMsg({ ok:false, text:'Écris le message et choisis une date.' }); return; }
+    if (!schedAll && schedIds.length === 0) { setSchedMsg({ ok:false, text:'Sélectionne au moins un élève.' }); return; }
+    setSchedSaving(true); setSchedMsg(null);
+    const body = { action:'addScheduled', text, sendOn: schedDate };
+    if (!schedAll) body.athleteIds = schedIds;
+    const d = await patchAutomations(body);
+    if (d) { setSchedText(''); setSchedDate(''); setSchedAll(true); setSchedIds([]); setSchedMsg({ ok:true, text:'✓ Message programmé' }); }
+    else setSchedMsg({ ok:false, text:'Programmation impossible. Réessaie.' });
+    setSchedSaving(false);
+  }
+
+  async function deleteScheduled(id) {
+    const d = await patchAutomations({ action:'deleteScheduled', id });
+    if (!d) setSchedMsg({ ok:false, text:'Suppression impossible. Réessaie.' });
+  }
+
   if (!user) return (
     <div style={{ minHeight:"100vh", background:"radial-gradient(120% 80% at 50% -10%, #111010, #0a0a0a 60%, #0c0c0c)", display:"flex", alignItems:"center", justifyContent:"center", color:"#8a8068", fontSize:"14px", letterSpacing:3 }}>
       CHARGEMENT…
@@ -1017,6 +1295,7 @@ export default function CoachDashboard() {
                 <span className="cx-badge red" style={{ minWidth:18, height:18, padding:"0 5px", marginLeft:8 }}>{total}</span>
               ) : null; })()}
             </button>
+            <button onClick={()=>{ setView('outils'); if (!automations) loadAutomations(); if (!checkinQuestions) loadCheckinTemplate(); }} className={`cx-tab${view==='outils'?' sel':''}`}>Outils</button>
             <button onClick={()=>{ setView('profil'); loadProfile(); }} className={`cx-tab${view==='profil'?' sel':''}`}>Mon compte</button>
           </div>
           <div style={{ display:"flex", gap:8 }}>
@@ -1131,6 +1410,12 @@ export default function CoachDashboard() {
             </div>
           )}
         </div>
+
+        {/* ─── Message groupé ─── */}
+        <button onClick={()=>{ setBroadcastOpen(true); setBroadcastResult(null); setBroadcastAll(true); setBroadcastIds([]); }}
+          className="cx-btn" style={{ width:"100%", padding:"12px", marginBottom:18, background:"#1f1b13", border:"1px solid var(--line-gold)", color:"var(--gold)", fontSize:"13.5px" }}>
+          📢 Message groupé
+        </button>
 
         {/* ─── Bibliothèque de programmes ─── */}
         <div className="cx-card cx-pad" style={{ marginBottom:18 }}>
@@ -1606,6 +1891,21 @@ export default function CoachDashboard() {
                     </button>
                   )}
 
+                  {/* Autonomie de l'élève : droit de générer lui-même ses programmes */}
+                  <div className="cx-inner" style={{ padding:"16px 18px", marginBottom:14 }}>
+                    <div className="t-eyebrow" style={{ marginBottom:5 }}>Autonomie de l'élève</div>
+                    <div style={{ fontSize:"12px", color:"var(--txt-4)", marginBottom:12, lineHeight:1.5 }}>Par défaut, c'est toi qui gères ses programmes.</div>
+                    {[
+                      { field:'selfNutritionAllowed', label:'Peut générer ses programmes nutrition' },
+                      { field:'selfMuscuAllowed', label:'Peut générer ses programmes muscu' },
+                    ].map(t => (
+                      <div key={t.field} style={{ display:"flex", justifyContent:"space-between", alignItems:"center", gap:12, padding:"7px 0" }}>
+                        <span style={{ fontSize:"13.5px", color:"var(--txt)" }}>{t.label}</span>
+                        <ToggleSwitch on={!!a[t.field]} onToggle={()=>toggleAutonomy(a.id, t.field, !a[t.field])} />
+                      </div>
+                    ))}
+                  </div>
+
                   {/* Journal du jour */}
                   {a.todayJournal?.length > 0 && (
                     <div style={{ marginBottom:12 }}>
@@ -1775,6 +2075,29 @@ export default function CoachDashboard() {
                               )}
                             </div>
                             {c.notes && <div style={{ fontSize:"12px", color:"var(--txt-2)", fontStyle:"italic", marginTop:5, lineHeight:1.4 }}>{c.notes}</div>}
+                            {/* Réponses aux questions personnalisées du check-in (hors champs déjà affichés ci-dessus) */}
+                            {(() => {
+                              const LEGACY = ['mood','energy','sleep','weight','notes'];
+                              const entries = Object.entries(c.answers || {}).filter(([k, v]) => !LEGACY.includes(k) && v !== null && v !== undefined && v !== '');
+                              if (entries.length === 0) return null;
+                              const qOf = id => (checkinQuestions || []).find(q => q.id === id);
+                              const fmt = (id, v) => {
+                                const t = qOf(id)?.type;
+                                if (t === 'bool' || typeof v === 'boolean') return (v === true || v === 'true' || v === 1) ? 'Oui' : 'Non';
+                                if (t === 'scale') return `${v}/5`;
+                                return String(v);
+                              };
+                              return (
+                                <div style={{ display:"flex", flexWrap:"wrap", gap:"8px 18px", marginTop:8 }}>
+                                  {entries.map(([k, v]) => (
+                                    <div key={k}>
+                                      <div style={{ fontSize:"11px", color:"var(--txt-4)", marginBottom:3, textTransform:"uppercase", letterSpacing:.5 }}>{qOf(k)?.label || k}</div>
+                                      <div style={{ fontSize:"12.5px", color:"var(--txt-2)" }}>{fmt(k, v)}</div>
+                                    </div>
+                                  ))}
+                                </div>
+                              );
+                            })()}
                           </div>
                         ))}
                       </div>
@@ -2078,6 +2401,39 @@ export default function CoachDashboard() {
         </div>
       )}
 
+      {/* Modal message groupé */}
+      {broadcastOpen && (
+        <div style={{ position:"fixed", inset:0, background:"rgba(0,0,0,0.85)", zIndex:200, display:"flex", alignItems:"center", justifyContent:"center", padding:16 }}
+          onClick={()=>{ if (!broadcastSending) setBroadcastOpen(false); }}>
+          <div className="cx-modal cx-scroll" style={{ padding:"26px 24px", maxWidth:460, width:"100%", maxHeight:"88vh", overflowY:"auto" }} onClick={e=>e.stopPropagation()}>
+            <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start", marginBottom:18 }}>
+              <div>
+                <div style={{ fontFamily:"var(--serif)", fontSize:"22px", fontWeight:600, color:"var(--cream)" }}>📢 Message groupé</div>
+                <div style={{ fontSize:"12.5px", color:"var(--txt-3)", marginTop:4 }}>Envoyé dans la messagerie de chaque élève sélectionné</div>
+              </div>
+              {!broadcastSending && <button onClick={()=>setBroadcastOpen(false)} style={{ background:"transparent", border:"none", fontSize:"20px", cursor:"pointer", color:"var(--txt-2)", padding:0 }}>✕</button>}
+            </div>
+            <textarea value={broadcastText} maxLength={2000} rows={5}
+              onChange={e=>setBroadcastText(e.target.value)}
+              placeholder="Ton message à tes élèves…"
+              className="cx-in" style={{ width:"100%", resize:"vertical", fontSize:"13.5px", lineHeight:1.5, marginBottom:4 }}/>
+            <div style={{ fontSize:"11px", color:"var(--txt-4)", textAlign:"right", marginBottom:14 }}>{broadcastText.length}/2000</div>
+            <AthletePicker athletes={athletes} all={broadcastAll} onAllChange={v=>{ setBroadcastAll(v); if (v) setBroadcastIds([]); }} selected={broadcastIds} onChange={setBroadcastIds}/>
+            {broadcastResult && (
+              <div style={{ fontSize:"12.5px", color: broadcastResult.ok?"var(--green)":"var(--amber)", marginTop:14, lineHeight:1.5 }}>{broadcastResult.text}</div>
+            )}
+            <div style={{ display:"flex", gap:10, marginTop:18 }}>
+              <button onClick={()=>{ if (!broadcastSending) setBroadcastOpen(false); }} className="cx-btn cx-btn-ghost" style={{ flex:1, padding:"11px", fontSize:"13.5px" }}>Fermer</button>
+              <button onClick={sendBroadcast} disabled={broadcastSending || !broadcastText.trim() || (!broadcastAll && broadcastIds.length===0)}
+                className="cx-btn cx-btn-gold"
+                style={{ flex:2, padding:"11px", fontSize:"13.5px", opacity:(broadcastSending || !broadcastText.trim() || (!broadcastAll && broadcastIds.length===0))?0.5:1 }}>
+                {broadcastSending ? "Envoi…" : broadcastAll ? "Envoyer à tous mes élèves" : `Envoyer à ${broadcastIds.length} élève${broadcastIds.length>1?'s':''}`}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Confirmation suppression athlète */}
       {confirmDelete && (
         <div style={{ position:"fixed", inset:0, background:"rgba(0,0,0,0.85)", zIndex:200, display:"flex", alignItems:"center", justifyContent:"center", padding:16 }}>
@@ -2090,6 +2446,158 @@ export default function CoachDashboard() {
             </div>
           </div>
         </div>
+      )}
+
+      {/* ─────────────── Vue Outils (check-in personnalisé + automations) ─────────────── */}
+      {view === 'outils' && (
+      <div style={{ maxWidth:760, margin:"0 auto", padding:"24px 16px" }}>
+
+        {/* ── Check-in hebdomadaire personnalisé ── */}
+        <div className="cx-inner" style={{ padding:"20px 22px", marginBottom:18 }}>
+          <div style={{ fontFamily:"var(--serif)", fontSize:18, fontWeight:600, color:"var(--cream)", marginBottom:6 }}>Check-in hebdomadaire</div>
+          <div style={{ fontSize:12.5, color:"var(--txt-3)", marginBottom:16, lineHeight:1.6 }}>Personnalise les questions que tes élèves remplissent chaque semaine · 12 questions max.</div>
+          {checkinQuestions === null ? (
+            <div style={{ fontSize:"13px", color:"var(--txt-3)", padding:"10px 0" }}>Chargement…</div>
+          ) : (
+            <>
+              {checkinQuestions.map((q, i) => (
+                <div key={i} style={{ display:"flex", gap:8, alignItems:"center", marginBottom:8 }}>
+                  <input value={q.label || ''} maxLength={120} placeholder="Intitulé de la question…"
+                    onChange={e=>setCheckinQuestions(prev=>prev.map((x,j)=>j===i?{...x, label:e.target.value}:x))}
+                    className="cx-in" style={{ flex:1, minWidth:0 }}/>
+                  <select value={q.type} onChange={e=>setCheckinQuestions(prev=>prev.map((x,j)=>j===i?{...x, type:e.target.value}:x))}
+                    className="cx-in" style={{ width:118, flexShrink:0, cursor:"pointer" }}>
+                    <option value="scale">Note /5</option>
+                    <option value="number">Nombre</option>
+                    <option value="text">Texte</option>
+                    <option value="bool">Oui / Non</option>
+                  </select>
+                  <button onClick={()=>setCheckinQuestions(prev=>prev.filter((_,j)=>j!==i))} disabled={checkinQuestions.length<=1} title="Supprimer la question"
+                    style={{ background:"none", border:"none", color:"var(--txt-4)", fontSize:"15px", cursor:checkinQuestions.length<=1?"not-allowed":"pointer", padding:"2px 4px", opacity:checkinQuestions.length<=1?0.4:1 }}>✕</button>
+                </div>
+              ))}
+              {checkinQuestions.length < 12 && (
+                <button onClick={()=>setCheckinQuestions(prev=>[...prev, { id:'', label:'', type:'scale' }])}
+                  style={{ background:"transparent", border:"1px dashed var(--line)", borderRadius:"var(--r-sm)", color:"var(--gold)", cursor:"pointer", fontSize:"12.5px", padding:"7px 14px", marginTop:4 }}>
+                  + Ajouter une question
+                </button>
+              )}
+              <div style={{ display:"flex", gap:10, alignItems:"center", flexWrap:"wrap", marginTop:16 }}>
+                <button onClick={saveCheckinTemplate} disabled={checkinSaving} className="cx-btn cx-btn-gold"
+                  style={{ padding:"10px 18px", fontSize:"13px", opacity:checkinSaving?0.6:1 }}>
+                  {checkinSaving ? "…" : "Enregistrer"}
+                </button>
+                <button onClick={restoreCheckinDefault} disabled={checkinSaving} className="cx-btn cx-btn-ghost" style={{ padding:"10px 16px", fontSize:"13px" }}>
+                  Rétablir le standard
+                </button>
+                {checkinMsg && <span style={{ fontSize:"12.5px", color: checkinMsg.ok?"var(--green)":"var(--amber)" }}>{checkinMsg.text}</span>}
+              </div>
+            </>
+          )}
+        </div>
+
+        {/* ── Séquence de bienvenue ── */}
+        <div className="cx-inner" style={{ padding:"20px 22px", marginBottom:18 }}>
+          <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", gap:12, marginBottom:6 }}>
+            <div style={{ fontFamily:"var(--serif)", fontSize:18, fontWeight:600, color:"var(--cream)" }}>Séquence de bienvenue</div>
+            {automations && <ToggleSwitch on={!!automations.welcome?.enabled} onToggle={toggleWelcome} />}
+          </div>
+          <div style={{ fontSize:12.5, color:"var(--txt-3)", marginBottom:16, lineHeight:1.6 }}>
+            Messages envoyés automatiquement à chaque nouvel élève. J+0 = le jour de son arrivée.
+            {automations && !automations.welcome?.enabled && <span style={{ color:"var(--txt-4)" }}> · Séquence désactivée</span>}
+          </div>
+          {automations === null ? (
+            <div style={{ fontSize:"13px", color:"var(--txt-3)", padding:"10px 0" }}>Chargement…</div>
+          ) : (
+            <>
+              {(automations.welcome?.steps || []).map((s, i) => (
+                <div key={i} style={{ display:"flex", gap:8, alignItems:"flex-start", marginBottom:8 }}>
+                  <div style={{ display:"flex", alignItems:"center", gap:5, flexShrink:0, paddingTop:9 }}>
+                    <span style={{ fontSize:"12.5px", color:"var(--txt-3)" }}>J+</span>
+                    <input type="number" min={0} max={90} value={s.dayOffset}
+                      onChange={e=>editWelcomeStep(i, 'dayOffset', e.target.value)}
+                      className="cx-in" style={{ width:60, padding:"8px 10px" }}/>
+                  </div>
+                  <textarea value={s.text || ''} maxLength={2000} rows={2}
+                    onChange={e=>editWelcomeStep(i, 'text', e.target.value)}
+                    placeholder="Message envoyé à l'élève…"
+                    className="cx-in" style={{ flex:1, minWidth:0, resize:"vertical", fontSize:"13.5px", lineHeight:1.5 }}/>
+                  <button onClick={()=>setAutomations(prev=>({ ...prev, welcome:{ ...prev.welcome, steps: prev.welcome.steps.filter((_,j)=>j!==i) } }))}
+                    disabled={(automations.welcome?.steps || []).length<=1} title="Supprimer ce message"
+                    style={{ background:"none", border:"none", color:"var(--txt-4)", fontSize:"15px", cursor:(automations.welcome?.steps||[]).length<=1?"not-allowed":"pointer", padding:"9px 4px 2px", opacity:(automations.welcome?.steps||[]).length<=1?0.4:1 }}>✕</button>
+                </div>
+              ))}
+              {(automations.welcome?.steps || []).length < 10 && (
+                <button onClick={()=>setAutomations(prev=>{
+                  const steps = prev.welcome?.steps || [];
+                  const last = steps.length ? Number(steps[steps.length-1].dayOffset) || 0 : -1;
+                  return { ...prev, welcome:{ ...prev.welcome, steps:[...steps, { dayOffset: last + 1, text:'' }] } };
+                })}
+                  style={{ background:"transparent", border:"1px dashed var(--line)", borderRadius:"var(--r-sm)", color:"var(--gold)", cursor:"pointer", fontSize:"12.5px", padding:"7px 14px", marginTop:4 }}>
+                  + Ajouter un message
+                </button>
+              )}
+              <div style={{ display:"flex", gap:10, alignItems:"center", flexWrap:"wrap", marginTop:16 }}>
+                <button onClick={saveWelcome} disabled={welcomeSaving} className="cx-btn cx-btn-gold"
+                  style={{ padding:"10px 18px", fontSize:"13px", opacity:welcomeSaving?0.6:1 }}>
+                  {welcomeSaving ? "…" : "Enregistrer la séquence"}
+                </button>
+                {welcomeMsg && <span style={{ fontSize:"12.5px", color: welcomeMsg.ok?"var(--green)":"var(--amber)" }}>{welcomeMsg.text}</span>}
+              </div>
+            </>
+          )}
+        </div>
+
+        {/* ── Messages programmés ── */}
+        <div className="cx-inner" style={{ padding:"20px 22px" }}>
+          <div style={{ fontFamily:"var(--serif)", fontSize:18, fontWeight:600, color:"var(--cream)", marginBottom:6 }}>Messages programmés</div>
+          <div style={{ fontSize:12.5, color:"var(--txt-3)", marginBottom:16, lineHeight:1.6 }}>Prépare un message à l'avance — il sera envoyé automatiquement à la date choisie.</div>
+          {automations === null ? (
+            <div style={{ fontSize:"13px", color:"var(--txt-3)", padding:"10px 0" }}>Chargement…</div>
+          ) : (
+            <>
+              {(automations.scheduled || []).length > 0 && (
+                <div style={{ marginBottom:18 }}>
+                  {automations.scheduled.map(s => (
+                    <div key={s.id} style={{ display:"flex", alignItems:"flex-start", gap:10, padding:"11px 0", borderBottom:"1px solid var(--line-soft)" }}>
+                      <div style={{ flex:1, minWidth:0 }}>
+                        <div style={{ fontSize:"13.5px", color:"var(--txt)", lineHeight:1.5 }}>{s.text}</div>
+                        <div style={{ fontSize:"11.5px", marginTop:4, color:"var(--txt-3)" }}>
+                          {s.athleteIds ? `${s.athleteIds.length} élève${s.athleteIds.length>1?'s':''}` : 'Tous les élèves'}
+                          <span style={{ color:"var(--line-gold)" }}> · </span>
+                          {s.sentAt
+                            ? <span style={{ color:"var(--green)" }}>✓ Envoyé le {new Date(s.sentAt).toLocaleDateString('fr-FR')}</span>
+                            : <span style={{ color:"var(--amber)" }}>Programmé pour le {new Date(s.sendOn).toLocaleDateString('fr-FR')}</span>}
+                        </div>
+                      </div>
+                      <button onClick={()=>deleteScheduled(s.id)} title="Supprimer"
+                        style={{ background:"none", border:"none", color:"var(--txt-4)", fontSize:"15px", cursor:"pointer", padding:"2px 4px" }}>✕</button>
+                    </div>
+                  ))}
+                </div>
+              )}
+              <textarea value={schedText} maxLength={2000} rows={3}
+                onChange={e=>setSchedText(e.target.value)}
+                placeholder="Ex : Pense à faire ton check-in ce dimanche !"
+                className="cx-in" style={{ width:"100%", resize:"vertical", marginBottom:10, fontSize:"13.5px", lineHeight:1.5 }}/>
+              <div style={{ display:"flex", gap:10, alignItems:"center", marginBottom:12 }}>
+                <span className="t-label">Envoyer le</span>
+                <input type="date" value={schedDate} min={new Date().toLocaleDateString('fr-CA')}
+                  onChange={e=>setSchedDate(e.target.value)}
+                  className="cx-in" style={{ padding:"9px 12px", colorScheme:"dark" }}/>
+              </div>
+              <AthletePicker athletes={athletes} all={schedAll} onAllChange={v=>{ setSchedAll(v); if (v) setSchedIds([]); }} selected={schedIds} onChange={setSchedIds}/>
+              <div style={{ display:"flex", gap:10, alignItems:"center", flexWrap:"wrap", marginTop:16 }}>
+                <button onClick={addScheduled} disabled={schedSaving || !schedText.trim() || !schedDate || (!schedAll && schedIds.length===0)}
+                  className="cx-btn cx-btn-gold" style={{ padding:"10px 18px", fontSize:"13px", opacity:(schedSaving || !schedText.trim() || !schedDate || (!schedAll && schedIds.length===0))?0.5:1 }}>
+                  {schedSaving ? "…" : "Programmer"}
+                </button>
+                {schedMsg && <span style={{ fontSize:"12.5px", color: schedMsg.ok?"var(--green)":"var(--amber)" }}>{schedMsg.text}</span>}
+              </div>
+            </>
+          )}
+        </div>
+      </div>
       )}
 
       {view === 'profil' && (
@@ -2417,7 +2925,7 @@ export default function CoachDashboard() {
                     {(day.exercises||[]).map((ex, ei) => (
                       <div key={ei} className="cx-inner" style={{ padding:"10px 14px", marginBottom:8 }}>
                         <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", gap:8 }}>
-                          <Ed value={ex.name} onChange={v => editMuscuEx(di, ei, 'name', v)} style={{ fontSize:"13.5px", fontWeight:500, color:"var(--cream)" }} />
+                          <ExoNameInput value={ex.name} onChange={v => editMuscuEx(di, ei, 'name', v)} style={{ fontSize:"13.5px", fontWeight:500, color:"var(--cream)" }} />
                           <div style={{ fontSize:"12px", color:"var(--txt-3)", display:"flex", alignItems:"center", gap:3, whiteSpace:"nowrap" }}>
                             <Ed value={String(ex.sets ?? '')} onChange={v => editMuscuEx(di, ei, 'sets', v)} style={{ color:"var(--txt-2)" }} />×
                             <Ed value={String(ex.reps ?? '')} onChange={v => editMuscuEx(di, ei, 'reps', v)} style={{ color:"var(--txt-2)" }} /> ·
