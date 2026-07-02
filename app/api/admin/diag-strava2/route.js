@@ -35,7 +35,30 @@ export async function POST(req) {
 
   const cache = await userDb(id).get('stravaCache');
   const token = await userDb(id).get('strava:token');
+
+  // Test direct de l'API Strava avec le token stocké : statut + quotas app
+  // (X-RateLimit-*). Lecture seule, 1 seul appel léger.
+  let apiTest = null;
+  if (token?.access_token) {
+    try {
+      const r = await fetch('https://www.strava.com/api/v3/athlete/activities?per_page=1', {
+        headers: { Authorization: `Bearer ${token.access_token}` },
+      });
+      const body = await r.json().catch(() => null);
+      apiTest = {
+        status: r.status,
+        rateUsage: r.headers.get('x-ratelimit-usage'),
+        rateLimit: r.headers.get('x-ratelimit-limit'),
+        readUsage: r.headers.get('x-readratelimit-usage'),
+        readLimit: r.headers.get('x-readratelimit-limit'),
+        sample: Array.isArray(body) && body[0] ? { date: body[0].start_date_local, name: body[0].name } : (body?.message || null),
+      };
+    } catch (e) {
+      apiTest = { status: 0, error: e.message };
+    }
+  }
   return Response.json({
+    apiTest,
     hasToken: !!token,
     updatedAt: cache?.updatedAt || null,
     count: (cache?.activities || []).length,
