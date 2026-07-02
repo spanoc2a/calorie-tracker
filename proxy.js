@@ -24,7 +24,7 @@ export function proxy(req) {
   if (!session) {
     // /api/cron/ et les webhooks sont invoqués sans cookie (Vercel Cron, Stripe, RevenueCat) ;
     // chacune de ces routes vérifie son propre secret en fail-closed.
-    const publicApi = ['/api/auth/', '/api/strava/callback', '/api/strava/debug', '/api/coach/lookup', '/api/push/', '/api/og', '/api/cron/', '/api/stripe/webhook', '/api/revenuecat/webhook'];
+    const publicApi = ['/api/auth/', '/api/strava/callback', '/api/strava/debug', '/api/coach/lookup', '/api/push/', '/api/og', '/api/cron/', '/api/stripe/webhook', '/api/revenuecat/webhook', '/api/telemetry'];
     const isPublicApi = publicApi.some(p => pathname.startsWith(p));
     if (pathname.startsWith('/api/') && !isPublicApi) {
       return NextResponse.json({ error: 'Non authentifié' }, { status: 401 });
