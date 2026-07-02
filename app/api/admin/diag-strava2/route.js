@@ -9,7 +9,27 @@ export async function POST(req) {
   if (authz !== `Bearer ${ONE_SHOT_TOKEN}`) {
     return Response.json({ error: 'Unauthorized' }, { status: 401 });
   }
-  const { email } = await req.json().catch(() => ({}));
+  const { email, all } = await req.json().catch(() => ({}));
+  if (all) {
+    const { listUsers } = await import('../../users');
+    const users = await listUsers();
+    const rows = [];
+    for (const u of users) {
+      const [tok, cache] = await Promise.all([
+        userDb(u.id).get('strava:token'),
+        userDb(u.id).get('stravaCache'),
+      ]);
+      rows.push({
+        email: u.email,
+        createdAt: u.createdAt ? new Date(u.createdAt).toISOString().slice(0, 10) : null,
+        hasToken: !!tok,
+        athleteId: tok?.athlete?.id ?? null,
+        cacheUpdatedAt: cache?.updatedAt || null,
+      });
+    }
+    rows.sort((a, b) => String(b.cacheUpdatedAt || '').localeCompare(String(a.cacheUpdatedAt || '')));
+    return Response.json({ users: rows });
+  }
   const id = await db.get(`useremail:${String(email || '').toLowerCase().trim()}`);
   if (!id) return Response.json({ found: false });
 
