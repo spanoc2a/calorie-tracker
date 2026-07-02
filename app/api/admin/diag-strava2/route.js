@@ -45,12 +45,38 @@ export async function POST(req) {
         headers: { Authorization: `Bearer ${token.access_token}` },
       });
       const body = await r.json().catch(() => null);
+      // Token FRAIS via refresh (en mémoire uniquement, rien n'est stocké) :
+      // si même un token neuf est 403 partout → suspension de l'app côté Strava.
+      let freshStatus = null;
+      try {
+        const rr = await fetch('https://www.strava.com/oauth/token', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            client_id: parseInt(process.env.STRAVA_CLIENT_ID),
+            client_secret: process.env.STRAVA_CLIENT_SECRET,
+            refresh_token: token.refresh_token,
+            grant_type: 'refresh_token',
+          }),
+        });
+        const rd = await rr.json().catch(() => ({}));
+        if (rr.ok && rd.access_token) {
+          const rf = await fetch('https://www.strava.com/api/v3/athlete', {
+            headers: { Authorization: `Bearer ${rd.access_token}` },
+          });
+          freshStatus = rf.status;
+        } else {
+          freshStatus = 'refresh:' + rr.status;
+        }
+      } catch (e) { freshStatus = 'err'; }
+
       // /athlete (scope profile) vs /athlete/activities (scope activity:read) :
       // si le profil passe mais pas les activités → scope manquant, pas de suspension.
       const rp = await fetch('https://www.strava.com/api/v3/athlete', {
         headers: { Authorization: `Bearer ${token.access_token}` },
       });
       apiTest = {
+        freshTokenAthleteStatus: freshStatus,
         athleteStatus: rp.status,
         status: r.status,
         rateUsage: r.headers.get('x-ratelimit-usage'),
