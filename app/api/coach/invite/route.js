@@ -13,7 +13,8 @@ async function verifyCoach(req) {
 // Générer un nouveau lien dynamique
 export async function POST(req) {
   const v = await verifyCoach(req); if (v.error) return v.error;
-  const { label = '', selfNutritionAllowed = true, selfMuscuAllowed = false } = await req.json().catch(() => ({}));
+  // Défaut REFUSÉ : l'élève coaché ne génère pas lui-même (IA invisible) sauf autorisation explicite du coach.
+  const { label = '', selfNutritionAllowed = false, selfMuscuAllowed = false } = await req.json().catch(() => ({}));
 
   // Code court lisible (6 chars sans lettres/chiffres ambigus) utilisable à la fois
   // comme token dans le lien et comme code à taper manuellement dans l'app.

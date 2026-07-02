@@ -21,7 +21,7 @@ export async function POST(req) {
     if (invite.usedAt) return Response.json({ error: 'Lien déjà utilisé' }, { status: 410 });
     if (new Date(invite.expiresAt) < new Date()) return Response.json({ error: 'Lien expiré' }, { status: 410 });
     coachId = invite.coachId;
-    invitePerms = { selfNutritionAllowed: invite.selfNutritionAllowed !== false, selfMuscuAllowed: !!invite.selfMuscuAllowed };
+    invitePerms = { selfNutritionAllowed: invite.selfNutritionAllowed === true, selfMuscuAllowed: invite.selfMuscuAllowed === true };
     // Marquer comme utilisé
     await db.set(`invite:${code}`, { ...invite, usedAt: new Date().toISOString(), usedBy: auth.userId });
   } else {
