@@ -641,7 +641,7 @@ export default function CoachDashboard() {
     editNutDay(di, d => ({ ...d, meals: d.meals.map((m, j) => j !== mi ? m : { ...m, items: m.items.filter((_, k) => k !== ii) }) }));
   }
   function addNutItem(di, mi) {
-    editNutDay(di, d => ({ ...d, meals: d.meals.map((m, j) => j !== mi ? m : { ...m, items: [...(m.items || []), { name: 'Nouvel aliment', quantity: '' }] }) }));
+    editNutDay(di, d => ({ ...d, meals: d.meals.map((m, j) => j !== mi ? m : { ...m, items: [...(m.items || []), { name: t('programData.newFood'), quantity: '' }] }) }));
   }
 
   async function generateCoachMuscuProgram() {
@@ -680,7 +680,7 @@ export default function CoachDashboard() {
     editMuscuDay(di, d => ({ ...d, exercises: (d.exercises || []).filter((_, k) => k !== ei) }));
   }
   function addMuscuEx(di) {
-    editMuscuDay(di, d => ({ ...d, exercises: [...(d.exercises || []), { name: 'Nouvel exercice', sets: 3, reps: '10', rest: '90s' }] }));
+    editMuscuDay(di, d => ({ ...d, exercises: [...(d.exercises || []), { name: t('programData.newExercise'), sets: 3, reps: '10', rest: '90s' }] }));
   }
 
   async function openChat(a) {
@@ -1028,10 +1028,12 @@ export default function CoachDashboard() {
 
   async function restoreCheckinDefault() {
     setCheckinSaving(true); setCheckinMsg(null);
+    // Ids/types identiques au défaut backend (champs legacy) — seuls les libellés suivent la langue du coach.
+    const localizedDefaults = DEFAULT_CHECKIN_QUESTIONS.map(q => ({ ...q, label: t(`checkinDefaults.${q.id}`) }));
     try {
-      const r = await fetch('/api/coach/checkin-template', { method:'PATCH', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ questions: DEFAULT_CHECKIN_QUESTIONS }) });
+      const r = await fetch('/api/coach/checkin-template', { method:'PATCH', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ questions: localizedDefaults }) });
       const d = await r.json().catch(() => ({}));
-      if (r.ok) { setCheckinQuestions(Array.isArray(d.questions) ? d.questions : DEFAULT_CHECKIN_QUESTIONS); setCheckinMsg({ ok:true, text: t('tools.msgDefaultRestored') }); }
+      if (r.ok) { setCheckinQuestions(Array.isArray(d.questions) ? d.questions : localizedDefaults); setCheckinMsg({ ok:true, text: t('tools.msgDefaultRestored') }); }
       else setCheckinMsg({ ok:false, text: d.error || t('tools.msgRestoreFail') });
     } catch { setCheckinMsg({ ok:false, text: t('tools.msgNetworkError') }); }
     setCheckinSaving(false);

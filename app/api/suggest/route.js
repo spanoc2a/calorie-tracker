@@ -21,8 +21,15 @@ export async function POST(req) {
   const lang = detectLang(req);
   const allowed = await rateLimit(`suggest:${auth.userId}`, 20, 3_600_000);
   if (!allowed) return Response.json({ error: errorText(lang, 'err_too_many_requests') }, { status: 429 });
-  // Élève rattaché à un coach : pas de génération de recettes IA.
-  if (await userDb(auth.userId).get('coachId')) return Response.json({ error: 'COACH_MANAGED', message: errorText(lang, 'coach_managed_recipes') }, { status: 403 });
+  // Élève rattaché à un coach : pas de génération de recettes IA, SAUF autonomie
+  // nutrition accordée par le coach (même règle que nutrition-program — le blanket
+  // ban ignorait selfNutritionAllowed → « la génération ne marche pas » côté élève).
+  if (await userDb(auth.userId).get('coachId')) {
+    const gateSettings = await userDb(auth.userId).get('userSettings') || {};
+    if (gateSettings.selfNutritionAllowed !== true) {
+      return Response.json({ error: 'COACH_MANAGED', message: errorText(lang, 'coach_managed_recipes') }, { status: 403 });
+    }
+  }
   const limit = await checkSuggestionsLimit(auth.userId);
   if (!limit.allowed) return upgradeResponse('suggestions');
   const { remainingKcal, remainingProtein, remainingCarbs, remainingFat, hour, ingredientLibrary, savedRecipes, type = 'maintenant', withWhey = true, bloodTest = null, healthHistory = '', diets = [] } = await req.json();
@@ -187,29 +194,36 @@ Format :
     system += `\nIMPORTANT: Write all meal names, step descriptions, ingredient names, and any text fields in ${LANG_NAMES[lang] || 'English'}.`;
   }
 
-  const res = await fetch('https://api.anthropic.com/v1/messages', {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'x-api-key': process.env.ANTHROPIC_API_KEY,
-      'anthropic-version': '2023-06-01',
-    },
-    body: JSON.stringify({
-      model: 'claude-haiku-4-5-20251001',
-      max_tokens: type === 'biohack' ? 2400 : 1400,
-      system,
-      messages: [{ role: 'user', content: userMsg }],
-    }),
-  });
-
-  const data = await res.json();
-  if (!res.ok) return Response.json({ error: 'Erreur API' }, { status: res.status });
-
-  const text = data.content?.find(b => b.type === 'text')?.text || '';
+  // Génération avec 1 retry : le biohack (réponse longue) pouvait dépasser max_tokens
+  // → JSON tronqué → parse impossible → 500 intermittente. On élargit le plafond,
+  // on détecte la troncature (stop_reason) et on retente une fois avant d'abandonner.
   let parsed = null;
-  try { parsed = JSON.parse(text); } catch {}
-  if (!parsed) { const m = text.match(/\{[\s\S]*\}/); if (m) try { parsed = JSON.parse(m[0]); } catch {} }
-  if (!parsed) return Response.json({ error: 'Erreur' }, { status: 500 });
+  for (let attempt = 0; attempt < 2 && !parsed; attempt++) {
+    const res = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-api-key': process.env.ANTHROPIC_API_KEY,
+        'anthropic-version': '2023-06-01',
+      },
+      body: JSON.stringify({
+        model: 'claude-haiku-4-5-20251001',
+        max_tokens: type === 'biohack' ? 4000 : 2000,
+        system,
+        messages: [{ role: 'user', content: userMsg }],
+      }),
+    });
+    const data = await res.json();
+    if (!res.ok) {
+      if (attempt === 0 && (res.status === 429 || res.status >= 500)) continue; // surcharge API → retente
+      return Response.json({ error: errorText(lang, 'err_generation') }, { status: res.status });
+    }
+    if (data.stop_reason === 'max_tokens') continue; // réponse tronquée → JSON invalide certain, retente
+    const text = data.content?.find(b => b.type === 'text')?.text || '';
+    try { parsed = JSON.parse(text); } catch {}
+    if (!parsed) { const m = text.match(/\{[\s\S]*\}/); if (m) try { parsed = JSON.parse(m[0]); } catch {} }
+  }
+  if (!parsed) return Response.json({ error: errorText(lang, 'err_generation') }, { status: 500 });
 
   await incrementSuggestions(auth.userId).catch(()=>{});
   return Response.json({ ...parsed, _usage: limit.limit === Infinity ? null : { used: (limit.count||0)+1, limit: limit.limit } });

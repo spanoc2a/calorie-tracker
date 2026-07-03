@@ -491,6 +491,17 @@ export const COACH_T = {
       underfeeding: 'sous-alimentation',
       calorie_excess: 'excès calorique',
     },
+    programData: {
+      newFood: 'Nouvel aliment',
+      newExercise: 'Nouvel exercice',
+    },
+    checkinDefaults: {
+      mood: 'Humeur',
+      energy: 'Énergie',
+      sleep: 'Sommeil (heures)',
+      weight: 'Poids (kg)',
+      notes: 'Notes',
+    },
   },
 
   en: {
@@ -974,6 +985,17 @@ export const COACH_T = {
       underfeeding: 'underfeeding',
       calorie_excess: 'calorie excess',
     },
+    programData: {
+      newFood: 'New food',
+      newExercise: 'New exercise',
+    },
+    checkinDefaults: {
+      mood: 'Mood',
+      energy: 'Energy',
+      sleep: 'Sleep (hours)',
+      weight: 'Weight (kg)',
+      notes: 'Notes',
+    },
   },
 
   es: {
@@ -1456,6 +1478,17 @@ export const COACH_T = {
     alerts: {
       underfeeding: 'subalimentación',
       calorie_excess: 'exceso calórico',
+    },
+    programData: {
+      newFood: 'Nuevo alimento',
+      newExercise: 'Nuevo ejercicio',
+    },
+    checkinDefaults: {
+      mood: 'Ánimo',
+      energy: 'Energía',
+      sleep: 'Sueño (horas)',
+      weight: 'Peso (kg)',
+      notes: 'Notas',
     },
   },
 };
