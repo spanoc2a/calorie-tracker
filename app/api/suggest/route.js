@@ -3,6 +3,7 @@ import { userDb } from '../db';
 import { checkSuggestionsLimit, incrementSuggestions, upgradeResponse } from '../../lib/planServer';
 import { summarizeStravaActivities, trainingLoadLabel } from '../../lib/healthContext';
 import { rateLimit } from '../../lib/ratelimit';
+import { errorText } from '../../lib/pushTexts';
 
 // Le biohack génère beaucoup de tokens (~15s) → laisser le temps à la fonction.
 export const maxDuration = 60;
@@ -17,13 +18,13 @@ function detectLang(req) {
 
 export async function POST(req) {
   const auth = await requireAuth(req); if (auth.error) return auth.error;
+  const lang = detectLang(req);
   const allowed = await rateLimit(`suggest:${auth.userId}`, 20, 3_600_000);
-  if (!allowed) return Response.json({ error: 'Trop de requêtes, réessaie dans un moment' }, { status: 429 });
+  if (!allowed) return Response.json({ error: errorText(lang, 'err_too_many_requests') }, { status: 429 });
   // Élève rattaché à un coach : pas de génération de recettes IA.
-  if (await userDb(auth.userId).get('coachId')) return Response.json({ error: 'COACH_MANAGED', message: 'Ton coach gère tes recettes.' }, { status: 403 });
+  if (await userDb(auth.userId).get('coachId')) return Response.json({ error: 'COACH_MANAGED', message: errorText(lang, 'coach_managed_recipes') }, { status: 403 });
   const limit = await checkSuggestionsLimit(auth.userId);
   if (!limit.allowed) return upgradeResponse('suggestions');
-  const lang = detectLang(req);
   const { remainingKcal, remainingProtein, remainingCarbs, remainingFat, hour, ingredientLibrary, savedRecipes, type = 'maintenant', withWhey = true, bloodTest = null, healthHistory = '', diets = [] } = await req.json();
 
   // Régimes / allergènes choisis côté app (chips). Contrainte STRICTE sur la génération.

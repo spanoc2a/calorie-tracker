@@ -3,6 +3,8 @@ import { requireAuth } from '../auth/session';
 import { getUserWithPlan, isPro, upgradeResponse, checkAiCoachLimit, incrementAiCoachUsage } from '../../lib/planServer';
 import { summarizeStravaActivities, formatPace, trainingLoadLabel } from '../../lib/healthContext';
 import { rateLimit } from '../../lib/ratelimit';
+import { detectLang, LANG_NAMES } from '../../lib/lang';
+import { errorText } from '../../lib/pushTexts';
 
 export const maxDuration = 60;
 
@@ -363,7 +365,7 @@ function computeDailyInsights(profile, hc, todayEntries, avgJournal, muscuSets, 
 
 // ─── System prompt ─────────────────────────────────────────────────────────
 
-function buildSystemPrompt(prenom, profile, muscuProgram, nutritionProgram, avgJournal, todayEntries, hc, weightLog, bloodTests, muscuSets, weeklySummary, stravaActivities) {
+function buildSystemPrompt(prenom, profile, muscuProgram, nutritionProgram, avgJournal, todayEntries, hc, weightLog, bloodTests, muscuSets, weeklySummary, stravaActivities, lang = 'fr') {
   const age   = calcAge(profile?.birthdate);
   const label = prenom || 'l\'utilisateur';
 
@@ -519,12 +521,12 @@ ${bloodBlock}
 ${weightBlock}
 
 [TENDANCES 12 SEMAINES — historique complet]
-${weeklyBlock}`;
+${weeklyBlock}${lang !== 'fr' ? `\n\nIMPORTANT: The user speaks ${LANG_NAMES[lang] || 'English'}. ALWAYS reply entirely in ${LANG_NAMES[lang] || 'English'} (the data above stays in French — never quote it verbatim, rephrase it in the user's language).` : ''}`;
 }
 
 // ─── Daily brief (generated once per day via Claude Haiku) ────────────────────
 
-async function generateDailyBrief(prenom, profile, hc, todayEntries, avgJournal, muscuSets, muscuProgram, weightLog, weeklySummary, stravaActivities) {
+async function generateDailyBrief(prenom, profile, hc, todayEntries, avgJournal, muscuSets, muscuProgram, weightLog, weeklySummary, stravaActivities, lang = 'fr') {
   const label    = prenom || 'toi';
   const insights = computeDailyInsights(profile, hc, todayEntries, avgJournal, muscuSets, muscuProgram, weightLog, stravaActivities);
   const priority = insights.filter(i => /^[⚠🔴🟡↑↓]/.test(i));
@@ -553,7 +555,10 @@ async function generateDailyBrief(prenom, profile, hc, todayEntries, avgJournal,
     body: JSON.stringify({
       model:      'claude-haiku-4-5-20251001',
       max_tokens: 130,
-      system:     `Tu es le coach IA personnel de ${label}. Génère un message d'accueil du jour (2-3 phrases MAX). Chaleureux, direct, UN conseil concret. Commence par "Bonjour ${label} !" ou variante naturelle. Pas de liste — phrases naturelles de coach. En français.`,
+      system:     `Tu es le coach IA personnel de ${label}. Génère un message d'accueil du jour (2-3 phrases MAX). Chaleureux, direct, UN conseil concret. ${
+        lang === 'en' ? `Start with "Good morning ${label}!" or a natural variant. No lists — natural coach sentences. Write the ENTIRE message in English.`
+        : lang === 'es' ? `Empieza con "¡Buenos días ${label}!" o una variante natural. Sin listas — frases naturales de coach. Escribe TODO el mensaje en español (tuteo).`
+        : `Commence par "Bonjour ${label} !" ou variante naturelle. Pas de liste — phrases naturelles de coach. En français.`}`,
       messages:   [{ role: 'user', content: `Données du jour:\n${contextLines.join('\n')}` }],
     }),
   });
@@ -638,7 +643,8 @@ export async function GET(req) {
     const prenom = firstName(auth.name || user?.name);
     const brief  = await generateDailyBrief(
       prenom, ctx.profile, ctx.hc, ctx.todayEntries, ctx.avgJournal,
-      ctx.muscuSets, ctx.muscuProgram, ctx.weightLog, weeklySummary, ctx.stravaCache
+      ctx.muscuSets, ctx.muscuProgram, ctx.weightLog, weeklySummary, ctx.stravaCache,
+      detectLang(req)
     );
 
     if (brief) {
@@ -657,10 +663,11 @@ export async function GET(req) {
 export async function POST(req) {
   try {
     const auth = await requireAuth(req); if (auth.error) return auth.error;
+    const lang = detectLang(req);
     const allowed = await rateLimit(`ai-coach:${auth.userId}`, 20, 3_600_000);
-    if (!allowed) return Response.json({ error: 'Trop de requêtes, réessaie dans un moment' }, { status: 429 });
+    if (!allowed) return Response.json({ error: errorText(lang, 'err_too_many_requests') }, { status: 429 });
     // Élève rattaché à un coach : pas de coach IA (il parle à son vrai coach).
-    if (await userDb(auth.userId).get('coachId')) return Response.json({ error: 'COACH_MANAGED', message: 'Tu as un coach — contacte-le directement.' }, { status: 403 });
+    if (await userDb(auth.userId).get('coachId')) return Response.json({ error: 'COACH_MANAGED', message: errorText(lang, 'coach_managed_ai') }, { status: 403 });
 
     const user = await getUserWithPlan(auth.userId);
     if (!user || !isPro(user.activePlan)) return upgradeResponse('ai_coach');
@@ -701,7 +708,8 @@ export async function POST(req) {
     const systemPrompt = buildSystemPrompt(
       prenom, ctx.profile, muscuSummary, ctx.nutritionProgram,
       ctx.avgJournal, ctx.todayEntries, ctx.hc,
-      recentWeight, ctx.bloodTests, ctx.muscuSets, weeklySummary, ctx.stravaCache
+      recentWeight, ctx.bloodTests, ctx.muscuSets, weeklySummary, ctx.stravaCache,
+      lang
     );
 
     // Sanitize history: strict alternating roles (Anthropic requirement)

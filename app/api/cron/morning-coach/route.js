@@ -3,6 +3,8 @@ import { runBatchedCron } from '../../../lib/cronBatch';
 import { getUserWithPlan, isPro } from '../../../lib/planServer';
 import { sendPushToUser } from '../../push/send/route';
 import { sendExpoPushToUser } from '../../../lib/expoPush';
+import { getUserLang, normalizeLang } from '../../../lib/lang';
+import { pushText } from '../../../lib/pushTexts';
 
 export const maxDuration = 300;
 
@@ -70,8 +72,9 @@ async function processCoachedSessionReminder(userId) {
   if (!session) return false; // pas de séance aujourd'hui → rien
 
   await udb.set('lastSessionReminder', today);
-  const title = `💪 Au programme aujourd'hui : ${session.label}`;
-  const body = 'Programmé par ton coach — bonne séance !';
+  const lang = await getUserLang(userId);
+  const title = pushText(lang, 'session_today_title', { label: session.label });
+  const body = pushText(lang, 'session_today_body');
   await Promise.all([
     sendPushToUser(userId, title, body, '/').catch(() => {}),
     sendExpoPushToUser(userId, title, body, { type: 'session' }),
@@ -192,7 +195,7 @@ function computeMorningInsights(profile, hc, yesterdayEntries, avgJournal, muscu
   return insights;
 }
 
-async function generateMorningBrief(prenom, profile, hc, yesterdayEntries, avgJournal, muscuSets, muscuProgram, weightLog, weeklySummary, todaySessionLabel) {
+async function generateMorningBrief(prenom, profile, hc, yesterdayEntries, avgJournal, muscuSets, muscuProgram, weightLog, weeklySummary, todaySessionLabel, lang = 'fr') {
   const label = prenom || 'toi';
   const insights = computeMorningInsights(profile, hc, yesterdayEntries, avgJournal, muscuSets, muscuProgram, weightLog);
   const priority = insights.filter(i => /^[⚠🔴🟡↑↓]/.test(i));
@@ -219,7 +222,10 @@ async function generateMorningBrief(prenom, profile, hc, yesterdayEntries, avgJo
     body: JSON.stringify({
       model: 'claude-haiku-4-5-20251001',
       max_tokens: 130,
-      system: `Tu es le coach IA personnel de ${label}. C'est le matin — l'utilisateur vient de se lever. Génère un message de réveil motivant (2-3 phrases MAX). Chaleureux, direct. Base-toi sur les données de récupération (sommeil, HRV) et ce qui s'est passé HIER — jamais sur ce qui n'a pas encore été fait aujourd'hui. Commence par "Bonjour ${label} !" ou variante. Pas de liste. En français.`,
+      system: `Tu es le coach IA personnel de ${label}. C'est le matin — l'utilisateur vient de se lever. Génère un message de réveil motivant (2-3 phrases MAX). Chaleureux, direct. Base-toi sur les données de récupération (sommeil, HRV) et ce qui s'est passé HIER — jamais sur ce qui n'a pas encore été fait aujourd'hui. ${
+        lang === 'en' ? `Start with "Good morning ${label}!" or a natural variant. No lists. Write the ENTIRE message in English.`
+        : lang === 'es' ? `Empieza con "¡Buenos días ${label}!" o una variante natural. Sin listas. Escribe TODO el mensaje en español (tuteo).`
+        : `Commence par "Bonjour ${label} !" ou variante. Pas de liste. En français.`}`,
       messages: [{ role: 'user', content: `Données de cette nuit et d'hier:\n${contextLines.join('\n')}` }],
     }),
   });
@@ -296,13 +302,14 @@ async function processMorningCoach(userId, userName) {
   }
 
   const prenom = firstName(userName || settings?.name);
+  const lang = normalizeLang(settings?.lang) || 'fr';
 
   // Séance prévue aujourd'hui (programme muscu solo + overrides) — mentionnée dans le brief.
   const todaySession = resolveTodaySession(muscuProgram, sessionOverrides);
 
   const brief = await generateMorningBrief(
     prenom, settings, hc, yesterdayEntries, avgJournal,
-    muscuSets, muscuProgram, weightLog, weeklySummary, todaySession?.label || null
+    muscuSets, muscuProgram, weightLog, weeklySummary, todaySession?.label || null, lang
   );
 
   if (!brief) return false;
@@ -312,9 +319,9 @@ async function processMorningCoach(userId, userName) {
   const newHistory = [...history, dailyMsg].slice(-50);
   await udb.set('aiCoachHistory', newHistory);
 
-  // Push: strip "Bonjour X !" from body to keep it short
-  const pushBody = brief.replace(/^(Bonjour|Salut|Hello)[^!,]*[!,]\s*/i, '').slice(0, 130);
-  const pushTitle = prenom ? `✦ Bonjour ${prenom} !` : '✦ Coach IA';
+  // Push: strip the greeting ("Bonjour X !", "Good morning X!", "¡Buenos días X!"…) to keep it short
+  const pushBody = brief.replace(/^¡?\s*(Bonjour|Salut|Hello|Good morning|Hi|Hey|Hola|Buenos días)[^!,]*[!,]\s*/i, '').slice(0, 130);
+  const pushTitle = prenom ? pushText(lang, 'morning_title', { prenom }) : pushText(lang, 'morning_title_generic');
   await sendExpoPush(expoPushToken, pushTitle, pushBody, { type: 'coach_brief' });
 
   return true;

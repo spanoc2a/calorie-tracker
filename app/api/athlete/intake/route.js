@@ -32,9 +32,15 @@ export async function POST(req) {
       const name = athlete?.name || 'Un élève';
       const { sendPushToUser } = await import('../../push/send/route');
       const { sendExpoPushToUser } = await import('../../../lib/expoPush');
+      const { getUserLang } = await import('../../../lib/lang');
+      const { pushText } = await import('../../../lib/pushTexts');
+      // Langue du DESTINATAIRE du push = le coach.
+      const coachLang = await getUserLang(coachId);
+      const title = pushText(coachLang, 'intake_received_title');
+      const body = pushText(coachLang, 'intake_received_body', { name });
       await Promise.all([
-        sendPushToUser(coachId, '📋 Questionnaire reçu', `${name} a rempli son questionnaire`, '/coach'),
-        sendExpoPushToUser(coachId, '📋 Questionnaire reçu', `${name} a rempli son questionnaire`, { type: 'intake_coach', athleteId: auth.userId }),
+        sendPushToUser(coachId, title, body, '/coach'),
+        sendExpoPushToUser(coachId, title, body, { type: 'intake_coach', athleteId: auth.userId }),
       ]);
     }
   } catch {}

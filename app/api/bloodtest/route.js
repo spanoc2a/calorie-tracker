@@ -207,11 +207,17 @@ export async function POST(req) {
 
   if (coachId) {
     const athlete = await import('../users').then(m => m.getUser(auth.userId));
+    // Langue du DESTINATAIRE du push = le coach.
+    const { getUserLang } = await import('../../lib/lang');
+    const { pushText } = await import('../../lib/pushTexts');
+    const coachLang = await getUserLang(coachId).catch(() => 'fr');
+    const pTitle = pushText(coachLang, 'blood_new_title');
+    const pBody = pushText(coachLang, 'blood_new_body', { name: athlete?.name || 'Un élève' });
     import('../push/send/route').then(m =>
-      m.sendPushToUser(coachId, '🩸 Nouveau bilan sanguin', `${athlete?.name || 'Un athlète'} a envoyé un bilan à analyser`, '/coach')
+      m.sendPushToUser(coachId, pTitle, pBody, '/coach')
     ).catch(() => {});
     import('../../lib/expoPush').then(m =>
-      m.sendExpoPushToUser(coachId, '🩸 Nouveau bilan', `${athlete?.name || 'Un élève'} a envoyé un bilan à analyser`, { type: 'blood_coach', athleteId: auth.userId })
+      m.sendExpoPushToUser(coachId, pTitle, pBody, { type: 'blood_coach', athleteId: auth.userId })
     ).catch(() => {});
   }
 

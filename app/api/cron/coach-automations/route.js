@@ -1,8 +1,22 @@
 import { db, userDb } from '../../db';
 import { runBatchedCron } from '../../../lib/cronBatch';
 import { sendCoachChatMessage } from '../../coach/broadcast/route';
+import { getUserLang } from '../../../lib/lang';
+import { pushText, PUSH_TEXTS } from '../../../lib/pushTexts';
 
 export const maxDuration = 300;
+
+// Steps de bienvenue PAR DÉFAUT (non personnalisés par le coach) : si le texte du step
+// est strictement le texte fr par défaut, on le sert dans la langue de l'ÉLÈVE.
+// Un texte modifié par le coach est envoyé tel quel.
+const WELCOME_KEY_BY_OFFSET = { 0: 'welcome_day0', 2: 'welcome_day2', 7: 'welcome_day7' };
+
+async function localizeWelcomeText(step, athleteId) {
+  const key = WELCOME_KEY_BY_OFFSET[step?.dayOffset];
+  if (!key || step.text !== PUSH_TEXTS.fr[key]) return step.text;
+  const lang = await getUserLang(athleteId);
+  return pushText(lang, key);
+}
 
 const DAY_MS = 86_400_000;
 
@@ -38,7 +52,8 @@ async function runWelcome(coach, steps, athleteIds) {
 
       await adb.set('welcomeSent', [...new Set([...sentOffsets, ...due.map(s => s.dayOffset)])]);
       for (const step of due) {
-        await sendCoachChatMessage(coach.id, coachName, athleteId, step.text, { auto: true });
+        const text = await localizeWelcomeText(step, athleteId);
+        await sendCoachChatMessage(coach.id, coachName, athleteId, text, { auto: true });
         sentAny = true;
       }
     }));

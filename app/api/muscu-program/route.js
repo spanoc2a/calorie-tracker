@@ -4,7 +4,8 @@ import { checkMuscuProgramLimit, incrementProgramUsage, upgradeResponse } from '
 import { sendExpoPushToUser } from '../../lib/expoPush';
 import { getHealthContext, buildStravaContext } from '../../lib/healthContext';
 import { rateLimit } from '../../lib/ratelimit';
-import { EXERCISE_NAMES } from '../../lib/exerciseNames';
+import { exerciseNamesFor } from '../../lib/exerciseNames';
+import { pushText, errorText } from '../../lib/pushTexts';
 
 export const maxDuration = 120;
 
@@ -49,22 +50,22 @@ export async function GET(req) {
 export async function POST(req) {
   try {
     const auth = await requireAuth(req); if (auth.error) return auth.error;
+    const lang = detectLang(req);
     const allowed = await rateLimit(`muscu-program:${auth.userId}`, 20, 3_600_000);
-    if (!allowed) return Response.json({ error: 'Trop de requêtes, réessaie dans un moment' }, { status: 429 });
+    if (!allowed) return Response.json({ error: errorText(lang, 'err_too_many_requests') }, { status: 429 });
     // Élève rattaché à un coach : la génération est gérée par le coach (anti court-circuit),
     // sauf si le coach a explicitement autorisé l'autonomie (défaut = refusé, règle IA-invisible).
     const coachIdGate = await userDb(auth.userId).get('coachId');
     if (coachIdGate) {
       const gateSettings = await userDb(auth.userId).get('userSettings') || {};
       if (gateSettings.selfMuscuAllowed !== true) {
-        return Response.json({ error: 'COACH_MANAGED', message: "Ton coach gère ton programme d'entraînement." }, { status: 403 });
+        return Response.json({ error: 'COACH_MANAGED', message: errorText(lang, 'coach_managed_muscu') }, { status: 403 });
       }
     }
     const access = await checkMuscuProgramLimit(auth.userId);
     if (!access.allowed) return access.limitLabel
       ? Response.json({ error: 'PROGRAM_LIMIT', limitLabel: access.limitLabel }, { status: 429 })
       : upgradeResponse('program');
-    const lang = detectLang(req);
     const unitSystem = detectUnitSystem(req);
     const udb = userDb(auth.userId);
     const { daysPerWeek = 3, goal = 'prise de masse', level = 'intermédiaire', preferences = '', equipment = 'salle' } = await req.json();
@@ -88,6 +89,8 @@ export async function POST(req) {
     const trainingDays = DAYS_MAP[daysPerWeek] || DAYS_MAP[3];
 
     const langInstr = lang !== 'fr' ? `\nIMPORTANT: Write ALL text fields (day, label, exercise names, notes, weeklyNotes) in ${LANG_NAMES[lang] || 'English'}.` : '';
+    // Vocabulaire de contrainte des exercices : FR canonique (démos mobiles) ou EN.
+    const exerciseNames = exerciseNamesFor(lang);
     const system = `Tu es un coach sportif expert en musculation. Génère un programme d'entraînement hebdomadaire personnalisé.
 Réponds UNIQUEMENT avec un objet JSON valide. Aucun texte avant ou après. Aucun backtick.
 Format exact :
@@ -102,7 +105,7 @@ Format exact :
 - Exercices avec nom précis, sets, reps (peut être une fourchette), temps de repos
 - Note optionnelle par exercice pour les points techniques importants
 - weeklyNotes : conseils sur la progression, récupération, nutrition autour des séances${langInstr}${unitSystemInstr(unitSystem)}
-- Pour le nom de chaque exercice, utilise EXCLUSIVEMENT un nom de cette liste (recopié à l'identique) : ${EXERCISE_NAMES.join(', ')}`;
+- Pour le nom de chaque exercice, utilise EXCLUSIVEMENT un nom de cette liste (recopié à l'identique) : ${exerciseNames.join(', ')}`;
 
     const stravaCtx = buildStravaContext(stravaCache, { periodLabel: '7j' });
     const stravaInstr = stravaCtx
@@ -128,14 +131,14 @@ Format exact :
 
     const raw = apiData.content?.find(b => b.type === 'text')?.text || '';
     const parsed = extractJSON(raw);
-    if (!parsed) return Response.json({ error: 'Génération impossible, réessaie.' }, { status: 500 });
+    if (!parsed) return Response.json({ error: errorText(lang, 'err_generation') }, { status: 500 });
 
     const program = { id: Date.now(), generatedAt: new Date().toISOString(), daysPerWeek, goal, level, equipment, preferences, ...parsed };
     await Promise.all([
       udb.set('muscuProgram', program),
       incrementProgramUsage(auth.userId, access.usageKey),
     ]);
-    sendExpoPushToUser(auth.userId, '⚡ Programme muscu généré !', "Ton plan d'entraînement est prêt.", { type: 'program_ready', programType: 'muscu' });
+    sendExpoPushToUser(auth.userId, pushText(lang, 'program_ready_muscu_title'), pushText(lang, 'program_ready_muscu_body'), { type: 'program_ready', programType: 'muscu' });
 
     const remaining = access.limit != null && access.limit !== Infinity ? access.limit - (access.count || 0) - 1 : null;
     return Response.json({ program, ...(remaining != null ? { remaining } : {}) });

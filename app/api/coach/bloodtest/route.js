@@ -3,6 +3,8 @@ import { getUser } from '../../users';
 import { requireAuth } from '../../auth/session';
 import { sendPushToUser } from '../../push/send/route';
 import { sendExpoPushToUser } from '../../../lib/expoPush';
+import { getUserLang } from '../../../lib/lang';
+import { pushText } from '../../../lib/pushTexts';
 
 // Coach valide un bilan sanguin d'un athlète et le lui envoie
 export async function POST(req) {
@@ -28,8 +30,10 @@ export async function POST(req) {
   await udb.set('bloodTests', bloodTests);
 
   const athlete = await getUser(athleteId);
-  const btTitle = '🩸 Ton bilan est prêt';
-  const btBody = `${me.name} a analysé ton bilan sanguin`;
+  // Langue du DESTINATAIRE du push = l'élève.
+  const athleteLang = await getUserLang(athleteId);
+  const btTitle = pushText(athleteLang, 'blood_ready_title');
+  const btBody = pushText(athleteLang, 'blood_ready_body', { name: me.name });
   sendPushToUser(athleteId, btTitle, btBody, '/').catch(() => {});
   sendExpoPushToUser(athleteId, btTitle, btBody, { type: 'blood_ready' });
 

@@ -2,12 +2,14 @@ import { db, userDb } from '../../../api/db';
 import { getUser } from '../../users';
 import { requireAuth } from '../../../api/auth/session';
 import { rateLimit } from '../../../lib/ratelimit';
+import { detectLang, getUserLang } from '../../../lib/lang';
+import { pushText, errorText } from '../../../lib/pushTexts';
 
 export async function POST(req) {
   // Rate-limit par IP contre le brute-force de codes d'invitation.
   const ip = req.headers.get('x-forwarded-for')?.split(',')[0]?.trim() || 'unknown';
   if (!(await rateLimit(`coach-link:${ip}`, 20, 3_600_000))) {
-    return Response.json({ error: 'Trop de tentatives, réessaie plus tard' }, { status: 429 });
+    return Response.json({ error: errorText(detectLang(req), 'err_too_many_attempts') }, { status: 429 });
   }
 
   const auth = await requireAuth(req); if (auth.error) return auth.error;
@@ -56,8 +58,10 @@ export async function POST(req) {
   try {
     const athlete = await getUser(auth.userId);
     const prenom = (athlete?.name || 'Un élève').trim().split(/\s+/)[0];
-    const title = '🎉 Nouvel élève !';
-    const body = `${prenom} vient de rejoindre ton coaching.`;
+    // Langue du DESTINATAIRE du push = le coach.
+    const coachLang = await getUserLang(coachId);
+    const title = pushText(coachLang, 'new_athlete_title');
+    const body = pushText(coachLang, 'new_athlete_body', { prenom });
     const { sendPushToUser } = await import('../../push/send/route');
     const { sendExpoPushToUser } = await import('../../../lib/expoPush');
     await Promise.all([

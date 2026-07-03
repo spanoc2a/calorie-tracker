@@ -3,6 +3,7 @@ import { getUser } from '../../users';
 import { requireAuth } from '../../../api/auth/session';
 import { getHealthContext, buildStravaContext } from '../../../lib/healthContext';
 import { rateLimit } from '../../../lib/ratelimit';
+import { pushText } from '../../../lib/pushTexts';
 
 // Échappe le HTML (anti-XSS stocké) pour les valeurs contrôlées par l'utilisateur.
 const escHtml = s => String(s).replace(/[&<>"']/g, c => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[c]));
@@ -289,10 +290,11 @@ ${structureSections}`;
 
   const html = data.content?.find(b=>b.type==='text')?.text || '';
 
-  // Stocker + push coach
+  // Stocker + push coach (destinataire = le coach appelant → langue de sa requête)
+  const coachLang = detectLang(req);
   await Promise.all([
     db.set(`coach:latestReport:${auth.userId}`, { html, athleteName: athlete.name, athleteId, generatedAt: new Date().toISOString(), seen: false }),
-    import('../../push/send/route').then(m => m.sendPushToUser(auth.userId, `📄 Rapport de ${athlete.name} prêt`, 'Appuie pour consulter le rapport', '/coach')).catch(() => {}),
+    import('../../push/send/route').then(m => m.sendPushToUser(auth.userId, pushText(coachLang, 'coach_report_ready_title', { name: athlete.name }), pushText(coachLang, 'coach_report_ready_body'), '/coach')).catch(() => {}),
   ]).catch(() => {});
 
   return Response.json({ html });
@@ -349,8 +351,10 @@ export async function PATCH(req) {
   try {
     const { sendPushToUser } = await import('../../push/send/route');
     const { sendExpoPushToUser } = await import('../../../lib/expoPush');
+    const { getUserLang } = await import('../../../lib/lang');
     const title = `📄 ${me.name || 'Ton coach'}`;
-    const body = 'Ton bilan nutritionnel est disponible !';
+    // Langue du DESTINATAIRE du push = l'élève.
+    const body = pushText(await getUserLang(athleteId), 'coach_report_sent_body');
     await Promise.all([
       sendPushToUser(athleteId, title, body, '/?tab=rapports'),
       sendExpoPushToUser(athleteId, title, body, { type: 'report' }),

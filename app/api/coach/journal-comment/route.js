@@ -53,8 +53,11 @@ export async function POST(req) {
 
     const { sendPushToUser } = await import('../../push/send/route');
     const { sendExpoPushToUser } = await import('../../../lib/expoPush');
+    const { getUserLang } = await import('../../../lib/lang');
+    const { pushText } = await import('../../../lib/pushTexts');
     const title = `📝 ${coach?.name || 'Ton coach'}`;
-    const body = 'a commenté ton journal';
+    // Langue du DESTINATAIRE du push = l'élève.
+    const body = pushText(await getUserLang(athleteId), 'journal_comment_body');
     await Promise.all([
       sendPushToUser(athleteId, title, body, '/?tab=journal'),
       sendExpoPushToUser(athleteId, title, body, { type: 'journal_comment', day: date }),

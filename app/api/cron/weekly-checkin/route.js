@@ -24,9 +24,14 @@ export async function GET(req) {
       // so no action needed server-side — just send a push reminder
       const { sendPushToUser } = await import('../../push/send/route');
       const { sendExpoPushToUser } = await import('../../../lib/expoPush');
+      const { getUserLang } = await import('../../../lib/lang');
+      const { pushText } = await import('../../../lib/pushTexts');
+      const lang = await getUserLang(athlete.id);
+      const title = pushText(lang, 'checkin_reminder_title');
+      const body = pushText(lang, 'checkin_reminder_body');
       await Promise.all([
-        sendPushToUser(athlete.id, '✅ Check-in de la semaine', 'Ton coach attend ton retour hebdomadaire', '/'),
-        sendExpoPushToUser(athlete.id, '✅ Check-in de la semaine', 'Ton coach attend ton retour hebdomadaire', { type: 'checkin' }),
+        sendPushToUser(athlete.id, title, body, '/'),
+        sendExpoPushToUser(athlete.id, title, body, { type: 'checkin' }),
       ]);
       return true;
     },

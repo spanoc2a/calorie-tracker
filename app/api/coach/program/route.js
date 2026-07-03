@@ -2,6 +2,8 @@ import { db, userDb } from '../../../api/db';
 import { getUser } from '../../users';
 import { requireAuth } from '../../../api/auth/session';
 import { getHealthContext, buildStravaContext } from '../../../lib/healthContext';
+import { detectLang, getUserLang, LANG_NAMES } from '../../../lib/lang';
+import { pushText } from '../../../lib/pushTexts';
 
 export const maxDuration = 60;
 
@@ -60,6 +62,9 @@ export async function POST(req) {
     udb.get('bloodTests').then(b => (b || []).slice(0, 1)),
     udb.get('stravaCache').then(s => s || null),
   ]);
+
+  // Langue de génération = celle de l'ATHLÈTE destinataire du programme.
+  const athleteLang = (settings.lang === 'en' || settings.lang === 'es') ? settings.lang : 'fr';
 
   const allEntries = await Promise.all(dates.map(d => udb.get(`day:${d}`).then(e => ({ d, entries: e || [] }))));
   const active = allEntries.filter(x => x.entries.length > 0);
@@ -126,7 +131,7 @@ Format exact :
 - Adapte les quantités pour atteindre l'objectif calorique journalier
 - Si bilan sanguin anormal : intègre des aliments correcteurs
 - Varie les repas, évite les répétitions exactes
-- Cuisine méditerranéenne, ingrédients simples et accessibles`;
+- Cuisine méditerranéenne, ingrédients simples et accessibles${athleteLang !== 'fr' ? `\nIMPORTANT: Generate the entire program in ${LANG_NAMES[athleteLang] || 'English'} — food names, notes, and weeklyNotes must all be in ${LANG_NAMES[athleteLang] || 'English'}.` : ''}`;
 
   const healthCtx = await getHealthContext(athleteId);
   const userMsg = `${profileCtx}${foodCtx}${bloodCtx}${stravaCtx}${stravaInstr}${prefsCtx ? '\n' + prefsCtx : ''}${healthCtx}`;
@@ -162,10 +167,11 @@ Format exact :
   const existing = await udb.get('coachPrograms') || [];
   await udb.set('coachPrograms', [program, ...existing].slice(0, 5));
 
-  // Push au coach
+  // Push au coach (destinataire = le coach appelant → langue de sa requête)
   try {
     const { sendPushToUser } = await import('../../push/send/route');
-    await sendPushToUser(v.coachId, `🥗 Programme prêt pour ${athlete.name}`, 'Reviens sur le tableau de bord pour réviser et envoyer', '/coach');
+    const coachLang = detectLang(req);
+    await sendPushToUser(v.coachId, pushText(coachLang, 'program_draft_ready_title', { name: athlete.name }), pushText(coachLang, 'draft_ready_body'), '/coach');
   } catch {}
 
   return Response.json({ program });
@@ -201,13 +207,13 @@ export async function PATCH(req) {
     : p);
   await udb.set('coachPrograms', updated);
 
-  // Push notification
+  // Push notification — langue du DESTINATAIRE (l'élève).
   try {
     const { sendPushToUser } = await import('../../push/send/route');
     const { sendExpoPushToUser } = await import('../../../lib/expoPush');
     const coach = v.me;
     const title = `🥗 ${coach?.name || 'Ton nutritionniste'}`;
-    const body = 'Ton plan nutritionnel est prêt !';
+    const body = pushText(await getUserLang(athleteId), 'coach_program_sent_body');
     await Promise.all([
       sendPushToUser(athleteId, title, body, '/?tab=programme'),
       sendExpoPushToUser(athleteId, title, body, { type: 'coach_program' }),

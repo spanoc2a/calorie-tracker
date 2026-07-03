@@ -14,6 +14,8 @@ export async function GET(req) {
 
   const { sendExpoPushToUser } = await import('../../../lib/expoPush');
   const { sendPushToUser } = await import('../../push/send/route');
+  const { getUserLang } = await import('../../../lib/lang');
+  const { pushText } = await import('../../../lib/pushTexts');
 
   return runBatchedCron(req, 'weekly-photo-reminder', {
     batch: 100,
@@ -22,9 +24,12 @@ export async function GET(req) {
     handler: async (u) => {
       const coachId = await userDb(u.id).get('coachId');
       if (!coachId) return false;
+      const lang = await getUserLang(u.id);
+      const title = pushText(lang, 'photo_reminder_title');
+      const body = pushText(lang, 'photo_reminder_body');
       await Promise.all([
-        sendExpoPushToUser(u.id, '📸 Photo de suivi', 'Envoie ta photo de progression de la semaine à ton coach.', { type: 'media_reminder' }),
-        sendPushToUser(u.id, '📸 Photo de suivi', 'Envoie ta photo de progression de la semaine.', '/').catch(() => {}),
+        sendExpoPushToUser(u.id, title, body, { type: 'media_reminder' }),
+        sendPushToUser(u.id, title, body, '/').catch(() => {}),
       ]);
       return true;
     },

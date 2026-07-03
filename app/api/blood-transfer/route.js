@@ -115,10 +115,13 @@ export async function PATCH(req) {
     type: 'bloodResult', read: false,
   }, ...notifs].slice(0, 20));
 
-  // Push notification
+  // Push notification — langue du DESTINATAIRE (l'élève/patient).
   try {
     const { sendPushToUser } = await import('../push/send/route');
-    await sendPushToUser(auth.userId, `🩺 ${coach?.name || 'Ton nutritionniste'}`, 'Ton bilan sanguin a été analysé', '/?tab=sante');
+    const { getUserLang } = await import('../../lib/lang');
+    const { pushText } = await import('../../lib/pushTexts');
+    const lang = await getUserLang(auth.userId);
+    await sendPushToUser(auth.userId, `🩺 ${coach?.name || 'Ton nutritionniste'}`, pushText(lang, 'blood_analyzed_body'), '/?tab=sante');
   } catch {}
 
   return Response.json({ ok: true });

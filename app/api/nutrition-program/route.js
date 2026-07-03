@@ -4,6 +4,7 @@ import { checkProgramLimit, incrementProgramUsage, upgradeResponse } from '../..
 import { sendExpoPushToUser } from '../../lib/expoPush';
 import { getHealthContext, buildStravaContext } from '../../lib/healthContext';
 import { rateLimit } from '../../lib/ratelimit';
+import { pushText, errorText } from '../../lib/pushTexts';
 
 export const maxDuration = 300;
 
@@ -60,22 +61,22 @@ export async function GET(req) {
 export async function POST(req) {
   try {
   const auth = await requireAuth(req); if (auth.error) return auth.error;
+  const lang = detectLang(req);
   const allowed = await rateLimit(`nutrition-program:${auth.userId}`, 20, 3_600_000);
-  if (!allowed) return Response.json({ error: 'Trop de requêtes, réessaie dans un moment' }, { status: 429 });
+  if (!allowed) return Response.json({ error: errorText(lang, 'err_too_many_requests') }, { status: 429 });
   // Élève rattaché à un coach : la génération est gérée par le coach (anti court-circuit),
   // sauf si le coach a explicitement autorisé l'autonomie (défaut = refusé, règle IA-invisible).
   const coachIdGate = await userDb(auth.userId).get('coachId');
   if (coachIdGate) {
     const gateSettings = await userDb(auth.userId).get('userSettings') || {};
     if (gateSettings.selfNutritionAllowed !== true) {
-      return Response.json({ error: 'COACH_MANAGED', message: 'Ton coach gère ton programme nutritionnel.' }, { status: 403 });
+      return Response.json({ error: 'COACH_MANAGED', message: errorText(lang, 'coach_managed_nutrition') }, { status: 403 });
     }
   }
   const access = await checkProgramLimit(auth.userId);
   if (!access.allowed) return access.limitLabel
     ? Response.json({ error: 'PROGRAM_LIMIT', limitLabel: access.limitLabel }, { status: 429 })
     : upgradeResponse('program');
-  const lang = detectLang(req);
   const unitSystem = detectUnitSystem(req);
   const udb = userDb(auth.userId);
   const { mainMeals = 3, snacks = 1, preferences = '', avoidFoods = '' } = await req.json();
@@ -180,7 +181,7 @@ Format exact :
     udb.set('nutritionProgram', program),
     incrementProgramUsage(auth.userId, access.usageKey),
   ]);
-  sendExpoPushToUser(auth.userId, '⚡ Programme nutritionnel généré !', 'Ton plan alimentaire est prêt.', { type: 'program_ready', programType: 'nutrition' });
+  sendExpoPushToUser(auth.userId, pushText(lang, 'program_ready_nutrition_title'), pushText(lang, 'program_ready_nutrition_body'), { type: 'program_ready', programType: 'nutrition' });
 
   const remaining = access.limit != null && access.limit !== Infinity ? access.limit - (access.count || 0) - 1 : null;
   return Response.json({ program, ...(remaining != null ? { remaining } : {}) });

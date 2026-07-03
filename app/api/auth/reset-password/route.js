@@ -4,6 +4,8 @@ import { getUserByEmail, getUser, updateUser } from '../../users';
 import { revokeAllSessions } from '../session';
 import { rateLimit } from '../../../lib/ratelimit';
 import { sendResetEmail } from '../../../lib/email';
+import { detectLang } from '../../../lib/lang';
+import { errorText } from '../../../lib/pushTexts';
 
 const ITERATIONS = 100_000;
 
@@ -14,7 +16,7 @@ function hashPassword(password, salt) {
 export async function POST(req) {
   const ip = req.headers.get('x-forwarded-for')?.split(',')[0]?.trim() || 'unknown';
   const allowed = await rateLimit(`reset-password:${ip}`, 3, 3_600_000);
-  if (!allowed) return Response.json({ error: 'Trop de demandes, réessaie dans une heure' }, { status: 429 });
+  if (!allowed) return Response.json({ error: errorText(detectLang(req), 'err_too_many_resets') }, { status: 429 });
 
   const { email } = await req.json();
   if (!email) return Response.json({ error: 'Email requis' }, { status: 400 });
@@ -30,7 +32,7 @@ export async function POST(req) {
     await sendResetEmail(user.email, user.name, token);
   } catch (e) {
     console.error('[RESET]', e);
-    return Response.json({ error: 'Erreur lors de l\'envoi de l\'email. Réessaie dans quelques instants.' }, { status: 500 });
+    return Response.json({ error: errorText(detectLang(req), 'err_email_send') }, { status: 500 });
   }
 
   return Response.json({ ok: true });

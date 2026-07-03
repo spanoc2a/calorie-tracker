@@ -2,6 +2,8 @@ import { db, userDb } from '../../db';
 import { runBatchedCron } from '../../../lib/cronBatch';
 import { sendPushToUser } from '../../push/send/route';
 import { sendExpoPushToUser } from '../../../lib/expoPush';
+import { getUserLang } from '../../../lib/lang';
+import { pushText } from '../../../lib/pushTexts';
 
 export const maxDuration = 300;
 
@@ -15,13 +17,10 @@ function dateKeyDaysAgo(n) {
   return parisDateKey(d);
 }
 
-function plur(n, sing, plural) {
-  return `${n} ${n > 1 ? plural : sing}`;
-}
-
 // « Ma journée coach » : agrège pour un coach les bilans à valider, médias non vus,
 // messages non lus et élèves inactifs ≥ 3 jours. Renvoie null si tout est à zéro.
-async function buildDigest(coachId) {
+// `lang` = langue du coach destinataire (textes pushTexts digest_*).
+async function buildDigest(coachId, lang) {
   const athleteIds = await db.get(`coach:${coachId}:athletes`) || [];
   if (athleteIds.length === 0) return null;
 
@@ -47,11 +46,12 @@ async function buildDigest(coachId) {
     if (days.every(d => d.length === 0)) inactiveAthletes++;
   }
 
+  const t = (base, n) => pushText(lang, `${base}_${n > 1 ? 'many' : 'one'}`, { n });
   const parts = [];
-  if (pendingReports)   parts.push(plur(pendingReports, 'bilan à valider', 'bilans à valider'));
-  if (unseenMedia)      parts.push(plur(unseenMedia, 'nouveau média', 'nouveaux médias'));
-  if (unreadMessages)   parts.push(plur(unreadMessages, 'message', 'messages'));
-  if (inactiveAthletes) parts.push(plur(inactiveAthletes, 'élève inactif', 'élèves inactifs'));
+  if (pendingReports)   parts.push(t('digest_reports', pendingReports));
+  if (unseenMedia)      parts.push(t('digest_media', unseenMedia));
+  if (unreadMessages)   parts.push(t('digest_messages', unreadMessages));
+  if (inactiveAthletes) parts.push(t('digest_inactive', inactiveAthletes));
   if (parts.length === 0) return null;
 
   return {
@@ -67,16 +67,16 @@ export async function GET(req) {
     return Response.json({ error: 'Non autorisé' }, { status: 401 });
   }
 
-  const title = '☀️ Ta journée coach';
-
   return runBatchedCron(req, 'coach-digest', {
     batch: 50,
     chunk: 5,
     filter: (u) => u.role === 'coach',
     handler: async (coach) => {
-      const digest = await buildDigest(coach.id);
+      const lang = await getUserLang(coach.id);
+      const digest = await buildDigest(coach.id, lang);
       if (!digest) return false;
 
+      const title = pushText(lang, 'coach_digest_title');
       await Promise.all([
         sendPushToUser(coach.id, title, digest.body, '/coach').catch(() => {}),
         sendExpoPushToUser(coach.id, title, digest.body, { type: 'coach_digest' }),

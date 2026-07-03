@@ -2,7 +2,9 @@ import { db, userDb } from '../../../api/db';
 import { getUser } from '../../users';
 import { requireAuth } from '../../../api/auth/session';
 import { getHealthContext, buildStravaContext } from '../../../lib/healthContext';
-import { EXERCISE_NAMES } from '../../../lib/exerciseNames';
+import { exerciseNamesFor } from '../../../lib/exerciseNames';
+import { detectLang, getUserLang, LANG_NAMES } from '../../../lib/lang';
+import { pushText } from '../../../lib/pushTexts';
 
 export const maxDuration = 120;
 
@@ -42,9 +44,17 @@ export async function POST(req) {
     ]);
     const { sex, weight, height } = settings;
 
+    // Langue de génération = celle de l'ATHLÈTE destinataire du programme.
+    const athleteLang = (settings.lang === 'en' || settings.lang === 'es') ? settings.lang : 'fr';
+    // Vocabulaire de contrainte des exercices : FR canonique (démos mobiles) ou EN.
+    const exerciseNames = exerciseNamesFor(athleteLang);
+
     const profileCtx = [`Athlète : ${athlete.name}`, sex && `Sexe : ${sex}`, weight && `Poids : ${weight} kg`, height && `Taille : ${height} cm`].filter(Boolean).join(', ');
 
-    const DAYS_MAP = { 2:['Lundi','Jeudi'], 3:['Lundi','Mercredi','Vendredi'], 4:['Lundi','Mardi','Jeudi','Vendredi'], 5:['Lundi','Mardi','Mercredi','Jeudi','Vendredi'], 6:['Lundi','Mardi','Mercredi','Jeudi','Vendredi','Samedi'] };
+    const DAYS_MAP_FR = { 2:['Lundi','Jeudi'], 3:['Lundi','Mercredi','Vendredi'], 4:['Lundi','Mardi','Jeudi','Vendredi'], 5:['Lundi','Mardi','Mercredi','Jeudi','Vendredi'], 6:['Lundi','Mardi','Mercredi','Jeudi','Vendredi','Samedi'] };
+    const DAYS_MAP_EN = { 2:['Monday','Thursday'], 3:['Monday','Wednesday','Friday'], 4:['Monday','Tuesday','Thursday','Friday'], 5:['Monday','Tuesday','Wednesday','Thursday','Friday'], 6:['Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'] };
+    const DAYS_MAP_ES = { 2:['Lunes','Jueves'], 3:['Lunes','Miércoles','Viernes'], 4:['Lunes','Martes','Jueves','Viernes'], 5:['Lunes','Martes','Miércoles','Jueves','Viernes'], 6:['Lunes','Martes','Miércoles','Jueves','Viernes','Sábado'] };
+    const DAYS_MAP = athleteLang === 'en' ? DAYS_MAP_EN : athleteLang === 'es' ? DAYS_MAP_ES : DAYS_MAP_FR;
     const trainingDays = DAYS_MAP[daysPerWeek] || DAYS_MAP[3];
 
     const system = `Tu es un coach sportif expert en musculation. Génère un programme d'entraînement hebdomadaire personnalisé.
@@ -57,8 +67,8 @@ Format exact :
 - Matériel : ${equipment}
 - 5 à 7 exercices par séance
 - Répartition intelligente des groupes musculaires
-- Exercices avec nom précis, sets, reps, temps de repos, note technique si pertinent
-- Pour le nom de chaque exercice, utilise EXCLUSIVEMENT un nom de cette liste (recopié à l'identique) : ${EXERCISE_NAMES.join(', ')}`;
+- Exercices avec nom précis, sets, reps, temps de repos, note technique si pertinent${athleteLang !== 'fr' ? `\n- IMPORTANT: Write ALL text fields (day, label, notes, weeklyNotes) in ${LANG_NAMES[athleteLang] || 'English'}.` : ''}
+- Pour le nom de chaque exercice, utilise EXCLUSIVEMENT un nom de cette liste (recopié à l'identique) : ${exerciseNames.join(', ')}`;
 
     const stravaCtx = buildStravaContext(stravaCache, { periodLabel: '7j' });
     const stravaInstr = stravaCtx
@@ -87,10 +97,11 @@ Format exact :
   const existing = await udb.get('coachMuscuPrograms') || [];
   await udb.set('coachMuscuPrograms', [program, ...existing].slice(0, 5));
 
-  // Push au coach
+  // Push au coach (destinataire = le coach appelant → langue de sa requête)
   try {
     const { sendPushToUser } = await import('../../push/send/route');
-    await sendPushToUser(v.coachId, `💪 Programme muscu prêt pour ${athlete.name}`, 'Reviens sur le tableau de bord pour réviser et envoyer', '/coach');
+    const coachLang = detectLang(req);
+    await sendPushToUser(v.coachId, pushText(coachLang, 'muscu_draft_ready_title', { name: athlete.name }), pushText(coachLang, 'draft_ready_body'), '/coach');
   } catch {}
 
   return Response.json({ program });
@@ -129,12 +140,12 @@ export async function PATCH(req) {
   const notifs = await udb.get('coachNotifications') || [];
   await udb.set('coachNotifications', [{ id: Date.now(), date: new Date().toISOString(), coachName: coach?.name || 'Ton coach', type: 'muscuProgram', read: false }, ...notifs].slice(0, 20));
 
-  // Push notification
+  // Push notification — langue du DESTINATAIRE (l'élève).
   try {
     const { sendPushToUser } = await import('../../push/send/route');
     const { sendExpoPushToUser } = await import('../../../lib/expoPush');
     const title = `💪 ${coach?.name || 'Ton coach'}`;
-    const body = 'Ton programme de musculation est prêt !';
+    const body = pushText(await getUserLang(athleteId), 'coach_muscu_sent_body');
     await Promise.all([
       sendPushToUser(athleteId, title, body, '/?tab=programme'),
       sendExpoPushToUser(athleteId, title, body, { type: 'coach_muscu' }),

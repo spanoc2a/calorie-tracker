@@ -45,11 +45,16 @@ export async function POST(req) {
       const me = await getUser(auth.userId);
       const { sendPushToUser } = await import('../../push/send/route');
       const { sendExpoPushToUser } = await import('../../../lib/expoPush');
-      const label = item.type === 'video' ? '🎥 Vidéo' : '📸 Photo';
-      const title = `${label} de ${me?.name || 'un élève'}`;
+      const { getUserLang } = await import('../../../lib/lang');
+      const { pushText } = await import('../../../lib/pushTexts');
+      // Langue du DESTINATAIRE du push = le coach.
+      const coachLang = await getUserLang(coachId);
+      const titleKey = item.type === 'video' ? 'media_new_video_title' : 'media_new_photo_title';
+      const title = pushText(coachLang, titleKey, { name: me?.name || 'un élève' });
+      const body = pushText(coachLang, 'media_new_body');
       await Promise.all([
-        sendPushToUser(coachId, title, 'Nouveau suivi à consulter', '/coach'),
-        sendExpoPushToUser(coachId, title, 'Nouveau suivi à consulter', { type: 'media', athleteId: auth.userId }),
+        sendPushToUser(coachId, title, body, '/coach'),
+        sendExpoPushToUser(coachId, title, body, { type: 'media', athleteId: auth.userId }),
       ]);
     } catch {}
   }

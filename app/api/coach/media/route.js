@@ -69,7 +69,10 @@ export async function PATCH(req) {
     try {
       const { sendPushToUser } = await import('../../push/send/route');
       const { sendExpoPushToUser } = await import('../../../lib/expoPush');
-      const title = '💬 Ton coach a réagi à ta photo';
+      const { getUserLang } = await import('../../../lib/lang');
+      const { pushText } = await import('../../../lib/pushTexts');
+      // Langue du DESTINATAIRE du push = l'élève (le commentaire du coach reste tel quel).
+      const title = pushText(await getUserLang(athleteId), 'media_comment_title');
       const extrait = comment.trim().slice(0, 60);
       await Promise.all([
         sendPushToUser(athleteId, title, extrait, '/').catch(() => {}),

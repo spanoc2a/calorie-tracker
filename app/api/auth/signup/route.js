@@ -4,6 +4,8 @@ import { getUser, getUserByEmail, createUser } from '../../users';
 import { sessionCookie, registerSession } from '../session';
 import { rateLimit } from '../../../lib/ratelimit';
 import { sendWelcomeEmail } from '../../../lib/email';
+import { detectLang, getUserLang } from '../../../lib/lang';
+import { pushText, errorText } from '../../../lib/pushTexts';
 
 const ITERATIONS = 100_000;
 
@@ -14,7 +16,7 @@ function hashPassword(password, salt, iterations = ITERATIONS) {
 export async function POST(req) {
   const ip = req.headers.get('x-forwarded-for')?.split(',')[0]?.trim() || 'unknown';
   const allowed = await rateLimit(`signup:${ip}`, 5, 3_600_000);
-  if (!allowed) return Response.json({ error: 'Trop de créations de comptes depuis cette IP' }, { status: 429 });
+  if (!allowed) return Response.json({ error: errorText(detectLang(req), 'err_too_many_signups') }, { status: 429 });
 
   const { email, password, name, role = 'athlete', cguAcceptedAt } = await req.json();
   if (!email || !password || !name) return Response.json({ error: 'Champs manquants' }, { status: 400 });
@@ -54,8 +56,10 @@ export async function POST(req) {
         // Notifier le coach du rattachement (push web + Expo + notif in-app) — fail-silent.
         try {
           const prenom = (name || 'Un élève').trim().split(/\s+/)[0];
-          const title = '🎉 Nouvel élève !';
-          const body = `${prenom} vient de rejoindre ton coaching.`;
+          // Langue du DESTINATAIRE du push = le coach.
+          const coachLang = await getUserLang(pending.coachId);
+          const title = pushText(coachLang, 'new_athlete_title');
+          const body = pushText(coachLang, 'new_athlete_body', { prenom });
           const { sendPushToUser } = await import('../../push/send/route');
           const { sendExpoPushToUser } = await import('../../../lib/expoPush');
           await Promise.all([

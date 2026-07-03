@@ -49,10 +49,14 @@ export async function POST(req) {
   };
   await udb.set('coachNotifications', [newNotif, ...notifs].slice(0, 20));
 
-  // Push notification
+  // Push notification — note libre du coach envoyée telle quelle ;
+  // texte par défaut localisé dans la langue du DESTINATAIRE (l'élève).
   try {
     const { sendPushToUser } = await import('../../push/send/route');
-    await sendPushToUser(athleteId, `🎯 ${v.coachName}`, note ? note : 'Tes objectifs nutritionnels ont été mis à jour', '/');
+    const { getUserLang } = await import('../../../lib/lang');
+    const { pushText } = await import('../../../lib/pushTexts');
+    const body = note ? note : pushText(await getUserLang(athleteId), 'goals_updated_body');
+    await sendPushToUser(athleteId, `🎯 ${v.coachName}`, body, '/');
   } catch {}
 
   return Response.json({ ok: true });

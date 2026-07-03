@@ -13,7 +13,11 @@ export async function POST(req) {
     if (coachId) {
       const athlete = await getUser(auth.userId);
       const { sendPushToUser } = await import('../push/send/route');
-      await sendPushToUser(coachId, `📄 Demande de bilan`, `${athlete?.name || 'Un patient'} demande un rapport nutritionnel`, '/coach');
+      const { getUserLang } = await import('../../lib/lang');
+      const { pushText } = await import('../../lib/pushTexts');
+      // Langue du DESTINATAIRE du push = le coach.
+      const coachLang = await getUserLang(coachId);
+      await sendPushToUser(coachId, pushText(coachLang, 'report_request_title'), pushText(coachLang, 'report_request_body', { name: athlete?.name || 'Un patient' }), '/coach');
     }
   } catch {}
 

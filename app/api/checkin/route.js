@@ -2,16 +2,24 @@ import { requireAuth } from '../auth/session';
 import { db, userDb } from '../db';
 import { getUser } from '../users';
 import { DEFAULT_CHECKIN_TEMPLATE } from '../coach/checkin-template/route';
+import { detectLang, getUserLang } from '../../lib/lang';
+import { pushText } from '../../lib/pushTexts';
+
+// Labels du template PAR DÉFAUT dans la langue de l'élève qui le remplit.
+// Un template personnalisé par le coach est servi tel quel (son texte).
+function localizeDefaultTemplate(lang) {
+  return DEFAULT_CHECKIN_TEMPLATE.map(q => ({ ...q, label: pushText(lang, `checkin_label_${q.id}`) }));
+}
 
 // Template applicable à un élève : celui de son coach, sinon le défaut
-// (élève sans coach, ou coach n'ayant jamais personnalisé).
-async function getTemplateFor(userId) {
+// (élève sans coach, ou coach n'ayant jamais personnalisé), localisé (`lang`).
+async function getTemplateFor(userId, lang = 'fr') {
   const coachId = await userDb(userId).get('coachId');
   if (coachId) {
     const stored = await userDb(coachId).get('checkinTemplate');
     if (Array.isArray(stored) && stored.length) return stored;
   }
-  return DEFAULT_CHECKIN_TEMPLATE;
+  return localizeDefaultTemplate(lang);
 }
 
 // Valide les réponses dynamiques contre le template. Renvoie { answers } ou { error }.
@@ -50,7 +58,7 @@ export async function GET(req) {
   const auth = await requireAuth(req); if (auth.error) return auth.error;
   const [checkins, template] = await Promise.all([
     userDb(auth.userId).get('checkins').then(v => v || []),
-    getTemplateFor(auth.userId),
+    getTemplateFor(auth.userId, detectLang(req)),
   ]);
   const week = lastMonday();
   const pendingWeek = checkins.some(c => c.weekDate === week) ? null : week;
@@ -90,9 +98,13 @@ export async function POST(req) {
       const name = athlete?.name || 'Un élève';
       const { sendPushToUser } = await import('../push/send/route');
       const { sendExpoPushToUser } = await import('../../lib/expoPush');
+      // Langue du DESTINATAIRE du push = le coach.
+      const coachLang = await getUserLang(coachId);
+      const title = pushText(coachLang, 'checkin_received_title');
+      const body = pushText(coachLang, 'checkin_received_body', { name });
       await Promise.all([
-        sendPushToUser(coachId, '✅ Check-in reçu', `${name} a fait son check-in`, '/coach'),
-        sendExpoPushToUser(coachId, '✅ Check-in reçu', `${name} a fait son check-in`, { type: 'checkin_coach', athleteId: auth.userId }),
+        sendPushToUser(coachId, title, body, '/coach'),
+        sendExpoPushToUser(coachId, title, body, { type: 'checkin_coach', athleteId: auth.userId }),
       ]);
     }
   } catch {}

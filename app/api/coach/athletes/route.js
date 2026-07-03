@@ -77,8 +77,13 @@ export async function GET(req) {
       : null;
     const lastWeight = weightLog.length > 0 ? wval(weightLog[weightLog.length-1]) : null;
 
-    const alert = avgKcal > 0 && Math.abs(avgKcal - goalKcal) > goalKcal * 0.2
-      ? (avgKcal < goalKcal ? 'sous-alimentation' : 'excès calorique')
+    // `alert` = libellé FR historique (rétro-compat, affiché brut par les anciens clients).
+    // `alertCode` = code stable pour la traduction côté mobile (t(alertCode)).
+    const alertCode = avgKcal > 0 && Math.abs(avgKcal - goalKcal) > goalKcal * 0.2
+      ? (avgKcal < goalKcal ? 'underfeeding' : 'calorie_excess')
+      : null;
+    const alert = alertCode === 'underfeeding' ? 'sous-alimentation'
+      : alertCode === 'calorie_excess' ? 'excès calorique'
       : null;
 
     // Dernier bilan sanguin — marqueurs anormaux uniquement
@@ -141,6 +146,7 @@ export async function GET(req) {
       activeDays7j: activeDays.length,
       lastWeight, weightTrend,
       alert,
+      alertCode,
       recovery: hc ? {
         sleep: hc.avgSleep ?? null,
         sleepStages: hc.sleepStages ?? null,
@@ -213,8 +219,12 @@ export async function DELETE(req) {
     ].slice(0, 20));
 
     sendCoachRemovalEmail(athlete.email, athlete.name, me.name).catch(() => {});
-    const title = '🎁 7 jours Pro offerts';
-    const body = "Ton suivi coach a pris fin — profite de 7 jours Pro, puis abonne-toi pour garder toutes les fonctionnalités.";
+    // Langue du DESTINATAIRE du push = l'élève retiré.
+    const { getUserLang } = await import('../../../lib/lang');
+    const { pushText } = await import('../../../lib/pushTexts');
+    const athleteLang = await getUserLang(athleteId).catch(() => 'fr');
+    const title = pushText(athleteLang, 'coach_removed_title');
+    const body = pushText(athleteLang, 'coach_removed_body');
     sendPushToUser(athleteId, title, body, '/?paywall=1').catch(() => {});
     sendExpoPushToUser(athleteId, title, body, { type: 'coach_removed' });
   }

@@ -3,6 +3,8 @@ import { db } from '../../db';
 import { getUserByEmail, updateUser } from '../../users';
 import { sessionCookie, registerSession } from '../session';
 import { rateLimit } from '../../../lib/ratelimit';
+import { detectLang } from '../../../lib/lang';
+import { errorText } from '../../../lib/pushTexts';
 
 const ITERATIONS = 100_000;
 
@@ -13,7 +15,7 @@ function hashPassword(password, salt, iterations = ITERATIONS) {
 export async function POST(req) {
   const ip = req.headers.get('x-forwarded-for')?.split(',')[0]?.trim() || 'unknown';
   const allowed = await rateLimit(`login:${ip}`, 10, 60_000);
-  if (!allowed) return Response.json({ error: 'Trop de tentatives, réessaie dans une minute' }, { status: 429 });
+  if (!allowed) return Response.json({ error: errorText(detectLang(req), 'err_too_many_attempts') }, { status: 429 });
 
   const { email, password } = await req.json();
   if (!email || !password) return Response.json({ error: 'Champs manquants' }, { status: 400 });

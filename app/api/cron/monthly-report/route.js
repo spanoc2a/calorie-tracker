@@ -2,6 +2,8 @@ import { db, userDb } from '../../db';
 import { runBatchedCron } from '../../../lib/cronBatch';
 import { getUserWithPlan, isPro } from '../../../lib/planServer';
 import { sendExpoPushToUser } from '../../../lib/expoPush';
+import { normalizeLang, LANG_NAMES } from '../../../lib/lang';
+import { pushText } from '../../../lib/pushTexts';
 
 export const maxDuration = 300;
 
@@ -206,6 +208,8 @@ async function generateMonthlyReport(userId) {
 
   // ── Profile ──────────────────────────────────────────────────────────────
   const s = settings || {};
+  // Langue du destinataire du bilan (génération cron → settings.lang, fallback fr).
+  const lang = normalizeLang(s.lang) || 'fr';
   const age = calcAge(s.birthdate);
   const goalMode = { loss: 'perte de poids', gain: 'prise de masse', maintain: 'maintien', perte: 'perte de poids', masse: 'prise de masse', maintien: 'maintien' }[s.mode] || s.mode || '?';
 
@@ -263,7 +267,8 @@ async function generateMonthlyReport(userId) {
   }
 
   const now = new Date();
-  const monthLabel = now.toLocaleDateString('fr-FR', { month: 'long', year: 'numeric' });
+  const monthLocale = lang === 'en' ? 'en-US' : lang === 'es' ? 'es-ES' : 'fr-FR';
+  const monthLabel = now.toLocaleDateString(monthLocale, { month: 'long', year: 'numeric' });
 
   const userContent = `[PROFIL]
 ${s.name ? 'Prénom: ' + s.name.split(' ')[0] : ''}
@@ -301,7 +306,7 @@ ${prevCtx}`;
     body: JSON.stringify({
       model: 'claude-haiku-4-5-20251001',
       max_tokens: 2200,
-      system: `Tu es un coach de performance personnel (nutrition, sport, santé). Rédige un bilan mensuel complet (max 500 mots). HTML simple : <h2>,<p>,<ul>,<li>,<strong>. Sections : <h2>📊 Ce mois en chiffres</h2> <h2>🍽 Nutrition</h2> <h2>💪 Entraînement</h2> <h2>📐 Composition corporelle</h2> (UNIQUEMENT si mensurations fournies : analyse la recomposition en croisant poids ET composition — poids stable + masse musc ↑ et % graisse ↓ = bonne recomp) <h2>❤️ Récupération & Santé</h2> (relie le ressenti — énergie/sommeil/humeur des check-ins — à la charge) <h2>📈 Progression</h2> <h2>✅ Points forts</h2> <h2>🎯 Objectifs du mois prochain</h2>. Si des blessures/limitations sont déclarées dans l'anamnèse, respecte-les impérativement (contre-indications, alternatives). IMPORTANT : base-toi UNIQUEMENT sur les données fournies. N'invente JAMAIS de données. Si une information n'est pas disponible (ex. pas de Strava, pas de bilan sanguin, pas de mensurations, pas de check-in…), NE le signale PAS et ne mentionne JAMAIS qu'une donnée manque ou est absente : ignore simplement la section concernée et concentre-toi sur ce qui est disponible. N'inclus une section QUE si tu as des données pour l'alimenter — saute silencieusement les sections sans données. Ne rédige aucune phrase du type "aucune donnée X", "X non fourni", "il manque", "données indisponibles" ou équivalent. Cite uniquement les chiffres que tu as. Mentionne le prénom si disponible. Sois analytique, encourageant et actionnable.`,
+      system: `Tu es un coach de performance personnel (nutrition, sport, santé). Rédige un bilan mensuel complet (max 500 mots). HTML simple : <h2>,<p>,<ul>,<li>,<strong>. Sections : <h2>📊 Ce mois en chiffres</h2> <h2>🍽 Nutrition</h2> <h2>💪 Entraînement</h2> <h2>📐 Composition corporelle</h2> (UNIQUEMENT si mensurations fournies : analyse la recomposition en croisant poids ET composition — poids stable + masse musc ↑ et % graisse ↓ = bonne recomp) <h2>❤️ Récupération & Santé</h2> (relie le ressenti — énergie/sommeil/humeur des check-ins — à la charge) <h2>📈 Progression</h2> <h2>✅ Points forts</h2> <h2>🎯 Objectifs du mois prochain</h2>. Si des blessures/limitations sont déclarées dans l'anamnèse, respecte-les impérativement (contre-indications, alternatives). IMPORTANT : base-toi UNIQUEMENT sur les données fournies. N'invente JAMAIS de données. Si une information n'est pas disponible (ex. pas de Strava, pas de bilan sanguin, pas de mensurations, pas de check-in…), NE le signale PAS et ne mentionne JAMAIS qu'une donnée manque ou est absente : ignore simplement la section concernée et concentre-toi sur ce qui est disponible. N'inclus une section QUE si tu as des données pour l'alimenter — saute silencieusement les sections sans données. Ne rédige aucune phrase du type "aucune donnée X", "X non fourni", "il manque", "données indisponibles" ou équivalent. Cite uniquement les chiffres que tu as. Mentionne le prénom si disponible. Sois analytique, encourageant et actionnable.${lang !== 'fr' ? ` IMPORTANT: Write the ENTIRE report (all headings and text) in ${LANG_NAMES[lang] || 'English'}.` : ''}`,
       messages: [{ role: 'user', content: userContent }],
     }),
   });
@@ -323,7 +328,7 @@ ${prevCtx}`;
   const existing = await udb.get('reportHistory') || [];
   const entry = {
     id: Date.now(),
-    title: `Bilan ${monthLabel}`,
+    title: pushText(lang, 'monthly_report_entry_title', { month: monthLabel }),
     days: 30,
     date: endDate,
     html,
@@ -331,7 +336,7 @@ ${prevCtx}`;
     summary,
   };
   await udb.set('reportHistory', [entry, ...existing].slice(0, 20));
-  await sendExpoPushToUser(userId, '📊 Bilan mensuel prêt', 'Ton bilan du mois est disponible dans Santé', { type: 'report' });
+  await sendExpoPushToUser(userId, pushText(lang, 'monthly_report_ready_title'), pushText(lang, 'monthly_report_ready_body'), { type: 'report' });
   return entry;
 }
 

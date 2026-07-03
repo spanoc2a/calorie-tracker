@@ -1,6 +1,7 @@
 import { userDb } from '../db';
 import { requireAuth } from '../auth/session';
 import { checkReportAccess, incrementReportUsage, upgradeResponse } from '../../lib/planServer';
+import { pushText } from '../../lib/pushTexts';
 
 export const maxDuration = 300;
 
@@ -491,9 +492,10 @@ export async function GET(req) {
 export async function POST(req) {
   try {
     const auth = await requireAuth(req); if (auth.error) return auth.error;
+    const lang = detectLang(req);
     const udbCheck = userDb(auth.userId);
     const coachId = await udbCheck.get('coachId');
-    if (coachId) return Response.json({ error: 'COACH_REQUIRED', message: 'Demande ton rapport à ton coach.' }, { status: 403 });
+    if (coachId) return Response.json({ error: 'COACH_REQUIRED', message: pushText(lang, 'coach_required_report') }, { status: 403 });
 
     const body = await req.json();
     const reportDays = body.type === 'health' ? 90 : (body.days || 90);
@@ -501,13 +503,14 @@ export async function POST(req) {
     if (!access.allowed) return access.reason === 'limit'
       ? Response.json({ error: 'REPORT_LIMIT', limitLabel: access.limitLabel }, { status: 429 })
       : upgradeResponse('reports');
-    const lang = detectLang(req);
     const unitSystem = detectUnitSystem(req);
     const udb = userDb(auth.userId);
     const result = body.type === 'health' ? await healthReport(body, udb, lang, unitSystem) : await nutritionReport(body, udb, lang, unitSystem);
     if (result.error) return Response.json({ error: result.error }, { status: 500 });
 
-    const title = body.type === 'health' ? 'Analyse de bilans' : `Rapport nutritionnel ${body.days || 90}j`;
+    const title = body.type === 'health'
+      ? pushText(lang, 'report_type_health')
+      : pushText(lang, 'report_type_nutrition', { days: body.days || 90 });
     const entry = {
       id: Date.now(),
       title,
@@ -522,7 +525,7 @@ export async function POST(req) {
     await Promise.all([
       udb.set('reportHistory', [entry, ...existing].slice(0, 20)),
       udb.set('latestReport', { ...entry, generatedAt: new Date().toISOString(), seen: false }),
-      import('../push/send/route').then(m => m.sendPushToUser(auth.userId, `📄 ${title} prêt`, 'Appuie pour consulter ton rapport', '/')).catch(() => {}),
+      import('../push/send/route').then(m => m.sendPushToUser(auth.userId, pushText(lang, 'report_self_ready_title', { title }), pushText(lang, 'report_self_ready_body'), '/')).catch(() => {}),
     ]).catch(() => {});
 
     await incrementReportUsage(auth.userId, access.usageKey);

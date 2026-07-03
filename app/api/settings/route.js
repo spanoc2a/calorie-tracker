@@ -1,6 +1,7 @@
 import { db, userDb } from '../db';
 import { getUser } from '../users';
 import { requireAuth } from '../auth/session';
+import { normalizeLang } from '../../lib/lang';
 
 // selfNutritionAllowed / selfMuscuAllowed ne sont PAS dans les défauts : ils sont renvoyés
 // tels que stockés (posés uniquement par le coach via coach/athlete). Défaut = refusé quand coaché.
@@ -36,6 +37,13 @@ export async function POST(req) {
   // de s'auto-autoriser en les postant depuis le client.
   delete body.selfNutritionAllowed;
   delete body.selfMuscuAllowed;
+  // Langue de l'utilisateur ('fr'|'en'|'es') — persistée pour les crons/pushes
+  // (getUserLang). Valeur invalide → ignorée (on garde la langue déjà stockée).
+  if (body.lang !== undefined) {
+    const lang = normalizeLang(body.lang);
+    if (lang) body.lang = lang;
+    else delete body.lang;
+  }
   const current = await udb.get('userSettings') || {};
   const updated = { ...DEFAULTS, ...current, ...body };
   await udb.set('userSettings', updated);
