@@ -18,9 +18,17 @@ export const db = {
   },
 
   async set(key, value) {
-    await supabase
+    // set(key, null) est utilisé partout comme « effacer » (déconnexion Strava/HC,
+    // retrait de coach…) : on supprime réellement la ligne. Un upsert de null peut
+    // échouer EN SILENCE (contrainte NOT NULL) et laisser l'ancienne valeur — vu en
+    // prod : Strava « reconnecté » après déconnexion.
+    if (value === null || value === undefined) {
+      return this.del(key);
+    }
+    const { error } = await supabase
       .from('kv_store')
       .upsert({ key, value }, { onConflict: 'key' });
+    if (error) console.error('kv set failed:', key, error.message);
   },
 
   async del(key) {
