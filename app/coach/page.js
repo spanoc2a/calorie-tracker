@@ -3,6 +3,8 @@ import { useState, useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
 import { sanitizeHtml } from "../lib/sanitize";
 import { EXERCISE_NAMES } from "../lib/exerciseNames";
+import { setStoredLocale } from "../lib/i18n";
+import { useCoachT, intlLocale } from "./i18nDict";
 
 // Questionnaire check-in standard (identique au défaut backend / champs legacy).
 const DEFAULT_CHECKIN_QUESTIONS = [
@@ -66,7 +68,7 @@ function ToggleSwitch({ on, onToggle, disabled }) {
 // garantie dans l'app de l'élève). Remplace Ed UNIQUEMENT pour ce champ :
 // <input> contrôlé localement + dropdown maison (max 6, insensible accents/casse),
 // remonte au state au blur ou au clic, exactement comme le blur d'Ed.
-function ExoNameInput({ value, onChange, style }) {
+function ExoNameInput({ value, onChange, style, placeholder }) {
   const [val, setVal] = useState(value ?? '');
   const [open, setOpen] = useState(false);
   useEffect(() => { setVal(value ?? ''); }, [value]);
@@ -82,7 +84,7 @@ function ExoNameInput({ value, onChange, style }) {
         onChange={e => { setVal(e.target.value); setOpen(true); }}
         onFocus={() => setOpen(true)}
         onBlur={() => { setOpen(false); commit(val); }}
-        placeholder="Nom de l'exercice…"
+        placeholder={placeholder}
         style={{ background: "transparent", border: "none", borderBottom: "1px dashed #3a3a2a", outline: "none",
           width: "100%", padding: 0, fontFamily: "var(--sans)", ...style }}/>
       {matches.length > 0 && (
@@ -106,17 +108,17 @@ function ExoNameInput({ value, onChange, style }) {
 
 // Sélection de destinataires : « Tous mes élèves » ou liste de cases.
 // Réutilisé par le message groupé et les messages programmés.
-function AthletePicker({ athletes, all, onAllChange, selected, onChange }) {
+function AthletePicker({ athletes, all, onAllChange, selected, onChange, t }) {
   return (
     <div>
       <label style={{ display: "flex", alignItems: "center", gap: 9, fontSize: "13.5px", color: "var(--txt)", cursor: "pointer", marginBottom: all ? 0 : 10 }}>
         <input type="checkbox" checked={all} onChange={e => onAllChange(e.target.checked)}
           style={{ accentColor: "#c8b890", width: 15, height: 15, cursor: "pointer" }}/>
-        Tous mes élèves
+        {t('athletePicker.allStudents')}
       </label>
       {!all && (
         <div className="cx-inner cx-scroll" style={{ padding: "10px 14px", maxHeight: 180, overflowY: "auto" }}>
-          {athletes.length === 0 && <div style={{ fontSize: "12.5px", color: "var(--txt-4)" }}>Aucun élève lié.</div>}
+          {athletes.length === 0 && <div style={{ fontSize: "12.5px", color: "var(--txt-4)" }}>{t('athletePicker.noStudentsLinked')}</div>}
           {athletes.map(a => (
             <label key={a.id} style={{ display: "flex", alignItems: "center", gap: 9, fontSize: "13px", color: "var(--txt-2)", cursor: "pointer", padding: "5px 0" }}>
               <input type="checkbox" checked={selected.includes(a.id)}
@@ -169,23 +171,24 @@ function Sparkline({ values, goal, color = "#c8b890", height = 64 }) {
 }
 
 // « Synchronisé il y a X » — formatte un ISO en durée relative compacte.
-function timeAgo(iso) {
+function timeAgo(iso, t) {
   if (!iso) return null;
-  const t = new Date(iso).getTime();
-  if (isNaN(t)) return null;
-  const diff = Date.now() - t;
+  const ts = new Date(iso).getTime();
+  if (isNaN(ts)) return null;
+  const diff = Date.now() - ts;
   const stale = diff > 3 * 24 * 3600 * 1000;
   const min = Math.floor(diff / 60000);
   let label;
-  if (min < 1) label = "à l'instant";
-  else if (min < 60) label = `il y a ${min} min`;
-  else if (min < 1440) label = `il y a ${Math.floor(min / 60)} h`;
-  else label = `il y a ${Math.floor(min / 1440)} j`;
+  if (min < 1) label = t('timeAgo.now');
+  else if (min < 60) label = t('timeAgo.minAgo', { n: min });
+  else if (min < 1440) label = t('timeAgo.hAgo', { n: Math.floor(min / 60) });
+  else label = t('timeAgo.dAgo', { n: Math.floor(min / 1440) });
   return { label, stale };
 }
 
 export default function CoachDashboard() {
   const router = useRouter();
+  const { locale, t } = useCoachT();
   const [user, setUser]         = useState(null);
   const [invites, setInvites] = useState([]);
   const [lastInvite, setLastInvite] = useState(null);
@@ -297,8 +300,8 @@ export default function CoachDashboard() {
     try {
       const r = await fetch('/api/coach/profile', { method:'PATCH', headers:{'Content-Type':'application/json'},
         body: JSON.stringify({ displayName: profile.displayName, bio: profile.bio, specialty: profile.specialty }) });
-      setProfileMsg(r.ok ? 'Enregistré ✓' : 'Erreur');
-    } catch { setProfileMsg('Erreur'); }
+      setProfileMsg(r.ok ? t('profile.savedOk') : t('profile.errorGeneric'));
+    } catch { setProfileMsg(t('profile.errorGeneric')); }
     setProfileSaving(false);
   }
   async function uploadLogo(file) {
@@ -308,9 +311,9 @@ export default function CoachDashboard() {
       const dataUrl = await resizeImageToDataUrl(file, 320);
       const r = await fetch('/api/coach/profile', { method:'PATCH', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ logo: dataUrl }) });
       const d = await r.json();
-      if (r.ok) { setProfile(p => ({ ...p, logo: dataUrl })); setProfileMsg('Logo enregistré ✓'); }
-      else setProfileMsg(d.error || 'Erreur logo');
-    } catch { setProfileMsg('Erreur logo'); }
+      if (r.ok) { setProfile(p => ({ ...p, logo: dataUrl })); setProfileMsg(t('profile.logoSaved')); }
+      else setProfileMsg(d.error || t('profile.errorLogo'));
+    } catch { setProfileMsg(t('profile.errorLogo')); }
   }
   async function removeLogo() {
     try {
@@ -319,12 +322,12 @@ export default function CoachDashboard() {
     } catch {}
   }
   async function deleteAccount() {
-    if (!window.confirm('Supprimer définitivement ton compte coach ? Tes élèves seront déliés (ils gardent leurs données). Action irréversible.')) return;
+    if (!window.confirm(t('profile.deleteConfirm'))) return;
     try {
       const r = await fetch('/api/coach/profile', { method:'DELETE', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ confirm:'SUPPRIMER' }) });
       if (r.ok) { await fetch('/api/auth/logout',{method:'POST'}).catch(()=>{}); router.push('/login'); }
-      else window.alert('Erreur lors de la suppression.');
-    } catch { window.alert('Erreur réseau — suppression non effectuée.'); }
+      else window.alert(t('profile.deleteFail'));
+    } catch { window.alert(t('profile.deleteNetworkError')); }
   }
 
   // Feature 1 — Bibliothèque de programmes
@@ -395,17 +398,17 @@ export default function CoachDashboard() {
       a.download = `suivi-${id}.${type === 'video' ? 'mp4' : 'jpg'}`;
       document.body.appendChild(a); a.click(); a.remove();
       URL.revokeObjectURL(objUrl);
-    } catch { window.alert('Téléchargement impossible.'); }
+    } catch { window.alert(t('errors.downloadFail')); }
   }
   async function sendMediaComment(athleteId, mediaId) {
     const comment = (mediaComment[mediaId]||'').trim();
     if (!comment) return;
     try {
       const r = await fetch('/api/coach/media',{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({athleteId,mediaId,comment})});
-      if (!r.ok) { window.alert('Commentaire non envoyé, réessaie.'); return; }
+      if (!r.ok) { window.alert(t('errors.commentSendFail')); return; }
       setMediaComment(prev=>({...prev,[mediaId]:''}));
       loadMedia(athleteId);
-    } catch { window.alert('Commentaire non envoyé, réessaie.'); }
+    } catch { window.alert(t('errors.commentSendFail')); }
   }
 
   // Feature 4 — Bilan initial
@@ -547,11 +550,11 @@ export default function CoachDashboard() {
 
   function exportPDF(html, name, days) {
     const w = window.open('', '_blank');
-    if (!w) { alert('Les popups sont bloquées. Autorise-les pour exporter.'); return; }
+    if (!w) { alert(t('reportModal.popupBlocked')); return; }
     // Échappe le nom (contrôlé par l'élève) injecté dans le HTML du PDF — anti-XSS.
     const esc = s => String(s).replace(/[&<>"']/g, c => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[c]));
     const safeName = esc(name);
-    w.document.write(`<!DOCTYPE html><html><head><meta charset="utf-8"><title>Rapport ${safeName}</title><style>body{font-family:Georgia,serif;max-width:700px;margin:40px auto;color:#1a1a1a;line-height:1.7}h2{margin-top:24px;color:#2a1a00}@media print{body{margin:20px}}</style></head><body><h1>Rapport nutritionnel — ${safeName}</h1><p style="color:#8a7a5a;font-size:0.85rem">${days}j · ${new Date().toLocaleDateString('fr-FR')}</p>${html}</body></html>`);
+    w.document.write(`<!DOCTYPE html><html><head><meta charset="utf-8"><title>${esc(t('reportModal.pdfDocTitle', { name }))}</title><style>body{font-family:Georgia,serif;max-width:700px;margin:40px auto;color:#1a1a1a;line-height:1.7}h2{margin-top:24px;color:#2a1a00}@media print{body{margin:20px}}</style></head><body><h1>${esc(t('reportModal.pdfHeading', { name }))}</h1><p style="color:#8a7a5a;font-size:0.85rem">${days}j · ${new Date().toLocaleDateString(intlLocale(locale))}</p>${html}</body></html>`);
     w.document.close();
     setTimeout(() => w.print(), 500);
   }
@@ -604,10 +607,10 @@ export default function CoachDashboard() {
       if (data.program) {
         setGeneratedProgram(data.program);
       } else {
-        setProgramError(data.error || 'Erreur lors de la génération. Réessaie.');
+        setProgramError(data.error || t('errors.genericGenFail'));
       }
     } catch {
-      setProgramError('Erreur réseau. Vérifie ta connexion et réessaie.');
+      setProgramError(t('errors.genericNetworkFail'));
     }
     setProgramLoading(false);
   }
@@ -650,8 +653,8 @@ export default function CoachDashboard() {
       });
       const data = await res.json();
       if (data.program) setGeneratedMuscuProg(data.program);
-      else setMuscuProgError(data.error || 'Erreur lors de la génération. Réessaie.');
-    } catch { setMuscuProgError('Erreur réseau. Réessaie.'); }
+      else setMuscuProgError(data.error || t('errors.genericGenFail'));
+    } catch { setMuscuProgError(t('errors.genericNetworkRetry')); }
     setMuscuProgLoading(false);
   }
 
@@ -733,7 +736,7 @@ export default function CoachDashboard() {
       if (!put.ok) throw new Error('upload');
       await fetch('/api/chat', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ athleteId: chatModal.id, imagePath: sign.storedPath }) });
       const r2 = await fetch(`/api/chat?athleteId=${chatModal.id}`); const d2 = await r2.json(); setChatMessages(d2.messages || []);
-    } catch { window.alert('Envoi de la photo impossible.'); }
+    } catch { window.alert(t('errors.photoSendFail')); }
     setChatSending(false);
   }
 
@@ -741,7 +744,7 @@ export default function CoachDashboard() {
     setReportAthlete(name); setReportAthleteId(athleteId); setReportLoading(true); setReportHtml(null); setReportSent(false);
     const res = await fetch('/api/coach/report', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({ athleteId, days: reportDays }) });
     const data = await res.json();
-    setReportHtml(data.html || '<p>Erreur</p>');
+    setReportHtml(data.html || `<p>${t('common.error')}</p>`);
     setReportLoading(false);
     fetch('/api/report-request', { method:'DELETE', headers:{'Content-Type':'application/json'}, body:JSON.stringify({ athleteId }) });
     setAthletes(prev => prev.map(a => a.id === athleteId ? { ...a, reportRequest: null } : a));
@@ -766,9 +769,9 @@ export default function CoachDashboard() {
     try {
       const r = await fetch('/api/coach/invite-email', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ email }) });
       const d = await r.json();
-      if (r.ok) { setEmailInviteMsg({ ok:true, text:`Invitation envoyée à ${email}. Dès qu'il crée son compte avec cet email, il est rattaché automatiquement.` }); setEmailInvite(''); }
-      else setEmailInviteMsg({ ok:false, text: d.message || d.error || 'Erreur' });
-    } catch { setEmailInviteMsg({ ok:false, text:'Erreur réseau' }); }
+      if (r.ok) { setEmailInviteMsg({ ok:true, text: t('invite.sentTo', { email }) }); setEmailInvite(''); }
+      else setEmailInviteMsg({ ok:false, text: d.message || d.error || t('common.error') });
+    } catch { setEmailInviteMsg({ ok:false, text: t('common.networkError') }); }
     setSendingEmailInvite(false);
   }
   async function generateInvite() {
@@ -962,7 +965,7 @@ export default function CoachDashboard() {
   async function sendBroadcast() {
     const text = broadcastText.trim();
     if (!text || broadcastSending) return;
-    if (!broadcastAll && broadcastIds.length === 0) { setBroadcastResult({ ok:false, text:'Sélectionne au moins un élève.' }); return; }
+    if (!broadcastAll && broadcastIds.length === 0) { setBroadcastResult({ ok:false, text: t('broadcast.selectAtLeastOne') }); return; }
     setBroadcastSending(true); setBroadcastResult(null);
     try {
       const body = broadcastAll ? { text } : { text, athleteIds: broadcastIds };
@@ -970,14 +973,14 @@ export default function CoachDashboard() {
       const d = await r.json().catch(() => ({}));
       if (r.ok) {
         const n = d.sent ?? 0;
-        setBroadcastResult({ ok:true, text:`✓ Envoyé à ${n} élève${n>1?'s':''}` });
+        setBroadcastResult({ ok:true, text: t('broadcast.sentCount', { count: n, n }) });
         setBroadcastText('');
       } else if (r.status === 429) {
-        setBroadcastResult({ ok:false, text: 'Doucement — tu viens déjà d\'envoyer un message groupé. Réessaie dans quelques minutes.' });
+        setBroadcastResult({ ok:false, text: t('broadcast.rateLimited') });
       } else {
-        setBroadcastResult({ ok:false, text: d.error || 'Envoi impossible. Réessaie.' });
+        setBroadcastResult({ ok:false, text: d.error || t('broadcast.sendFail') });
       }
-    } catch { setBroadcastResult({ ok:false, text:'Erreur réseau. Vérifie ta connexion et réessaie.' }); }
+    } catch { setBroadcastResult({ ok:false, text: t('broadcast.networkError') }); }
     setBroadcastSending(false);
   }
 
@@ -1005,7 +1008,7 @@ export default function CoachDashboard() {
 
   async function saveCheckinTemplate() {
     const qs = (checkinQuestions || []).map(q => ({ ...q, label: (q.label || '').trim() })).filter(q => q.label);
-    if (qs.length === 0) { setCheckinMsg({ ok:false, text:'Ajoute au moins une question.' }); return; }
+    if (qs.length === 0) { setCheckinMsg({ ok:false, text: t('tools.msgAddQuestion') }); return; }
     // Conserve les ids existants (les réponses passées y sont liées), génère un slug unique pour les nouvelles.
     const ids = [];
     const withIds = qs.map(q => {
@@ -1017,9 +1020,9 @@ export default function CoachDashboard() {
     try {
       const r = await fetch('/api/coach/checkin-template', { method:'PATCH', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ questions: withIds }) });
       const d = await r.json().catch(() => ({}));
-      if (r.ok) { setCheckinQuestions(Array.isArray(d.questions) ? d.questions : withIds); setCheckinMsg({ ok:true, text:'✓ Questionnaire enregistré' }); }
-      else setCheckinMsg({ ok:false, text: d.error || 'Enregistrement impossible. Réessaie.' });
-    } catch { setCheckinMsg({ ok:false, text:'Erreur réseau. Réessaie.' }); }
+      if (r.ok) { setCheckinQuestions(Array.isArray(d.questions) ? d.questions : withIds); setCheckinMsg({ ok:true, text: t('tools.msgSavedQuestionnaire') }); }
+      else setCheckinMsg({ ok:false, text: d.error || t('tools.msgSaveFail') });
+    } catch { setCheckinMsg({ ok:false, text: t('tools.msgNetworkError') }); }
     setCheckinSaving(false);
   }
 
@@ -1028,9 +1031,9 @@ export default function CoachDashboard() {
     try {
       const r = await fetch('/api/coach/checkin-template', { method:'PATCH', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ questions: DEFAULT_CHECKIN_QUESTIONS }) });
       const d = await r.json().catch(() => ({}));
-      if (r.ok) { setCheckinQuestions(Array.isArray(d.questions) ? d.questions : DEFAULT_CHECKIN_QUESTIONS); setCheckinMsg({ ok:true, text:'✓ Questionnaire standard rétabli' }); }
-      else setCheckinMsg({ ok:false, text: d.error || 'Impossible de rétablir. Réessaie.' });
-    } catch { setCheckinMsg({ ok:false, text:'Erreur réseau. Réessaie.' }); }
+      if (r.ok) { setCheckinQuestions(Array.isArray(d.questions) ? d.questions : DEFAULT_CHECKIN_QUESTIONS); setCheckinMsg({ ok:true, text: t('tools.msgDefaultRestored') }); }
+      else setCheckinMsg({ ok:false, text: d.error || t('tools.msgRestoreFail') });
+    } catch { setCheckinMsg({ ok:false, text: t('tools.msgNetworkError') }); }
     setCheckinSaving(false);
   }
 
@@ -1067,7 +1070,7 @@ export default function CoachDashboard() {
     if (!w || welcomeSaving) return;
     setWelcomeMsg(null);
     const d = await patchAutomations({ welcome: { enabled: !w.enabled, steps: cleanWelcomeSteps(w.steps) } });
-    if (!d) setWelcomeMsg({ ok:false, text:'Modification impossible. Réessaie.' });
+    if (!d) setWelcomeMsg({ ok:false, text: t('tools.msgModifyFail') });
   }
 
   function editWelcomeStep(i, field, value) {
@@ -1078,35 +1081,35 @@ export default function CoachDashboard() {
     const w = automations?.welcome;
     if (!w || welcomeSaving) return;
     const steps = cleanWelcomeSteps(w.steps);
-    if (steps.length === 0) { setWelcomeMsg({ ok:false, text:'Écris au moins un message.' }); return; }
+    if (steps.length === 0) { setWelcomeMsg({ ok:false, text: t('tools.msgWriteMessage') }); return; }
     setWelcomeSaving(true); setWelcomeMsg(null);
     const d = await patchAutomations({ welcome: { enabled: !!w.enabled, steps } });
-    setWelcomeMsg(d ? { ok:true, text:'✓ Séquence enregistrée' } : { ok:false, text:'Enregistrement impossible. Réessaie.' });
+    setWelcomeMsg(d ? { ok:true, text: t('tools.msgSequenceSaved') } : { ok:false, text: t('tools.msgSaveFail') });
     setWelcomeSaving(false);
   }
 
   async function addScheduled() {
     const text = schedText.trim();
     if (schedSaving) return;
-    if (!text || !schedDate) { setSchedMsg({ ok:false, text:'Écris le message et choisis une date.' }); return; }
-    if (!schedAll && schedIds.length === 0) { setSchedMsg({ ok:false, text:'Sélectionne au moins un élève.' }); return; }
+    if (!text || !schedDate) { setSchedMsg({ ok:false, text: t('tools.msgWriteAndDate') }); return; }
+    if (!schedAll && schedIds.length === 0) { setSchedMsg({ ok:false, text: t('tools.msgSelectAtLeastOne') }); return; }
     setSchedSaving(true); setSchedMsg(null);
     const body = { action:'addScheduled', text, sendOn: schedDate };
     if (!schedAll) body.athleteIds = schedIds;
     const d = await patchAutomations(body);
-    if (d) { setSchedText(''); setSchedDate(''); setSchedAll(true); setSchedIds([]); setSchedMsg({ ok:true, text:'✓ Message programmé' }); }
-    else setSchedMsg({ ok:false, text:'Programmation impossible. Réessaie.' });
+    if (d) { setSchedText(''); setSchedDate(''); setSchedAll(true); setSchedIds([]); setSchedMsg({ ok:true, text: t('tools.msgScheduled') }); }
+    else setSchedMsg({ ok:false, text: t('tools.msgScheduleFail') });
     setSchedSaving(false);
   }
 
   async function deleteScheduled(id) {
     const d = await patchAutomations({ action:'deleteScheduled', id });
-    if (!d) setSchedMsg({ ok:false, text:'Suppression impossible. Réessaie.' });
+    if (!d) setSchedMsg({ ok:false, text: t('tools.msgDeleteFail') });
   }
 
   if (!user) return (
     <div style={{ minHeight:"100vh", background:"radial-gradient(120% 80% at 50% -10%, #111010, #0a0a0a 60%, #0c0c0c)", display:"flex", alignItems:"center", justifyContent:"center", color:"#8a8068", fontSize:"14px", letterSpacing:3 }}>
-      CHARGEMENT…
+      {t('common.loading').toUpperCase()}
     </div>
   );
 
@@ -1276,7 +1279,7 @@ export default function CoachDashboard() {
             fontFamily:"var(--serif)", fontSize:"22px", fontWeight:600, color:"var(--gold)",
             background:"#1a1712", border:"1px solid var(--line-gold)" }}>N</div>
           <div>
-            <div className="cx-head-logo">Espace Coach</div>
+            <div className="cx-head-logo">{t('header.title')}</div>
             <div className="cx-head-sub">{user.name}</div>
           </div>
         </div>
@@ -1284,23 +1287,33 @@ export default function CoachDashboard() {
           {/* Bascule de vue : Athlètes / Messages */}
           <div className="cx-tabs">
             <button onClick={()=>setView('athletes')} className={`cx-tab${view==='athletes'?' sel':''}`}>
-              Athlètes
+              {t('header.athletesTab')}
               {(() => { const m = athletes.reduce((s,a)=>s+(a.mediaUnseen||0),0); return m>0 ? (
-                <span className="cx-badge" title="Nouveaux suivis photo/vidéo" style={{ minWidth:18, height:18, padding:"0 5px", marginLeft:8, background:"#3a2f1a", color:"var(--gold)", border:"1px solid var(--line-gold)" }}>📸 {m}</span>
+                <span className="cx-badge" title={t('header.newMediaTitle')} style={{ minWidth:18, height:18, padding:"0 5px", marginLeft:8, background:"#3a2f1a", color:"var(--gold)", border:"1px solid var(--line-gold)" }}>📸 {m}</span>
               ) : null; })()}
             </button>
             <button onClick={()=>setView('messages')} className={`cx-tab${view==='messages'?' sel':''}`}>
-              Messages
+              {t('header.messagesTab')}
               {(() => { const total = Object.values(chatUnread).reduce((s,n)=>s+(n||0),0); return total>0 ? (
                 <span className="cx-badge red" style={{ minWidth:18, height:18, padding:"0 5px", marginLeft:8 }}>{total}</span>
               ) : null; })()}
             </button>
-            <button onClick={()=>{ setView('outils'); if (!automations) loadAutomations(); if (!checkinQuestions) loadCheckinTemplate(); }} className={`cx-tab${view==='outils'?' sel':''}`}>Outils</button>
-            <button onClick={()=>{ setView('profil'); loadProfile(); }} className={`cx-tab${view==='profil'?' sel':''}`}>Mon compte</button>
+            <button onClick={()=>{ setView('outils'); if (!automations) loadAutomations(); if (!checkinQuestions) loadCheckinTemplate(); }} className={`cx-tab${view==='outils'?' sel':''}`}>{t('header.toolsTab')}</button>
+            <button onClick={()=>{ setView('profil'); loadProfile(); }} className={`cx-tab${view==='profil'?' sel':''}`}>{t('header.accountTab')}</button>
+          </div>
+          {/* Sélecteur de langue */}
+          <div style={{ display:"flex", gap:2, background:"var(--sunk)", border:"1px solid var(--line)", borderRadius:"var(--r-sm)", padding:3 }}>
+            {['fr','en','es'].map(code => (
+              <button key={code} onClick={()=>setStoredLocale(code)}
+                style={{ background: locale===code ? "var(--gold)" : "transparent", color: locale===code ? "#1a1610" : "var(--txt-3)",
+                  border:"none", borderRadius:7, padding:"5px 9px", fontSize:"11px", fontWeight:600, letterSpacing:0.5, cursor:"pointer", textTransform:"uppercase" }}>
+                {code}
+              </button>
+            ))}
           </div>
           <div style={{ display:"flex", gap:8 }}>
-            <button onClick={refreshAthletes} className="cx-icon-btn" title="Rafraîchir">↻</button>
-            <button onClick={async()=>{ await fetch('/api/auth/logout',{method:'POST'}); router.push('/login'); }} className="cx-icon-btn">Déconnexion</button>
+            <button onClick={refreshAthletes} className="cx-icon-btn" title={t('header.refresh')}>↻</button>
+            <button onClick={async()=>{ await fetch('/api/auth/logout',{method:'POST'}); router.push('/login'); }} className="cx-icon-btn">{t('header.logout')}</button>
           </div>
         </div>
       </div>
@@ -1313,41 +1326,41 @@ export default function CoachDashboard() {
         {notifPermission === 'default' && (
           <div className="cx-card" style={{ borderColor:"var(--line-gold)", padding:"18px 20px", marginBottom:20, display:"flex", alignItems:"center", justifyContent:"space-between", gap:14 }}>
             <div>
-              <div style={{ fontSize:"14px", fontWeight:500, color:"var(--cream)" }}>Activer les notifications</div>
-              <div style={{ fontSize:"12.5px", color:"var(--txt-3)", marginTop:5, lineHeight:1.5 }}>Messages, bilans, programmes</div>
+              <div style={{ fontSize:"14px", fontWeight:500, color:"var(--cream)" }}>{t('header.notifTitle')}</div>
+              <div style={{ fontSize:"12.5px", color:"var(--txt-3)", marginTop:5, lineHeight:1.5 }}>{t('header.notifDesc')}</div>
             </div>
             <button onClick={enableCoachNotifications} className="cx-btn cx-btn-gold"
               style={{ padding:"10px 18px", fontSize:"13px", whiteSpace:"nowrap" }}>
-              Activer
+              {t('header.notifEnable')}
             </button>
           </div>
         )}
         {notifPermission === 'granted' && (
-          <div style={{ fontSize:"11px", color:"var(--green)", textAlign:"center", marginBottom:14, letterSpacing:1.5, textTransform:"uppercase" }}>● Notifications actives</div>
+          <div style={{ fontSize:"11px", color:"var(--green)", textAlign:"center", marginBottom:14, letterSpacing:1.5, textTransform:"uppercase" }}>● {t('header.notifActive')}</div>
         )}
 
         {/* Inviter un élève */}
         <div className="cx-card cx-pad" style={{ marginBottom:18 }}>
-          <div className="t-eyebrow" style={{ marginBottom:13 }}>✦ Inviter un élève</div>
+          <div className="t-eyebrow" style={{ marginBottom:13 }}>✦ {t('invite.title')}</div>
 
           {/* Recommandé : par email → l'élève est rattaché automatiquement à l'inscription (jamais de version solo). */}
-          <div style={{ fontSize:"12px", color:"var(--txt-3)", marginBottom:8 }}>Par email <span style={{ color:"var(--txt-4)" }}>· recommandé, rattachement auto</span></div>
+          <div style={{ fontSize:"12px", color:"var(--txt-3)", marginBottom:8 }}>{t('invite.byEmailLabel')} <span style={{ color:"var(--txt-4)" }}>{t('invite.byEmailRecommended')}</span></div>
           <div style={{ display:"flex", gap:8, marginBottom: emailInviteMsg?8:14 }}>
-            <input value={emailInvite} onChange={e=>setEmailInvite(e.target.value)} placeholder="email de l'élève" type="email" className="cx-in" style={{ flex:1 }}/>
+            <input value={emailInvite} onChange={e=>setEmailInvite(e.target.value)} placeholder={t('invite.emailPh')} type="email" className="cx-in" style={{ flex:1 }}/>
             <button onClick={sendEmailInvite} disabled={sendingEmailInvite} className="cx-btn"
               style={{ padding:"9px 15px", background:"#1f1b13", border:"1px solid var(--line-gold)", color:"var(--gold)", fontSize:"13.5px", whiteSpace:"nowrap" }}>
-              {sendingEmailInvite ? "…" : "Inviter"}
+              {sendingEmailInvite ? "…" : t('invite.inviteBtn')}
             </button>
           </div>
           {emailInviteMsg && <div style={{ fontSize:"12px", color: emailInviteMsg.ok?"var(--gold)":"#e07a7a", marginBottom:14, lineHeight:1.5 }}>{emailInviteMsg.text}</div>}
 
-          <div style={{ fontSize:"12px", color:"var(--txt-3)", marginBottom:8 }}>Ou par code / lien</div>
+          <div style={{ fontSize:"12px", color:"var(--txt-3)", marginBottom:8 }}>{t('invite.orByCode')}</div>
           <div style={{ display:"flex", gap:8, marginBottom:12 }}>
-            <input value={inviteLabel} onChange={e=>setInviteLabel(e.target.value)} placeholder="Nom de l'élève (optionnel)" className="cx-in"
+            <input value={inviteLabel} onChange={e=>setInviteLabel(e.target.value)} placeholder={t('invite.namePh')} className="cx-in"
               style={{ flex:1 }}/>
             <button onClick={generateInvite} disabled={generatingInvite} className="cx-btn"
               style={{ padding:"9px 15px", background:"#1f1b13", border:"1px solid var(--line-gold)", color:"var(--gold)", fontSize:"13.5px", whiteSpace:"nowrap" }}>
-              {generatingInvite ? "…" : "Générer"}
+              {generatingInvite ? "…" : t('invite.generateBtn')}
             </button>
           </div>
 
@@ -1359,11 +1372,11 @@ export default function CoachDashboard() {
               </div>
               <button onClick={()=>copyInviteLink(lastInvite.token)} className="cx-btn cx-btn-gold"
                 style={{ width:"100%", padding:"12px 0", fontSize:"13.5px" }}>
-                {copied===`link-${lastInvite.token}` ? "✓ Lien copié" : "Partager l'invitation"}
+                {copied===`link-${lastInvite.token}` ? t('invite.linkCopied') : t('invite.shareInvitation')}
               </button>
               <div style={{ fontSize:"12px", color:"var(--txt-3)", marginTop:12, textAlign:"center", lineHeight:1.5 }}>
-                Le lien contient le code — l'athlète crée son compte ou le saisit dans l'app.<br/>
-                <span style={{ color:"var(--txt-4)" }}>Usage unique · expire dans 7 jours</span>
+                {t('invite.linkContains')}<br/>
+                <span style={{ color:"var(--txt-4)" }}>{t('invite.singleUse')}</span>
               </div>
             </div>
           )}
@@ -1371,16 +1384,16 @@ export default function CoachDashboard() {
           {/* Historique */}
           <button onClick={()=>setInvitesOpen(o=>!o)}
             style={{ background:"none", border:"none", color:"var(--txt-3)", fontSize:"13px", cursor:"pointer", padding:0 }}>
-            {invitesOpen ? "Masquer l'historique" : "Voir l'historique"}
+            {invitesOpen ? t('invite.hideHistory') : t('invite.showHistory')}
           </button>
           {invitesOpen && (
             <div style={{ marginTop:14 }}>
-              {invites.length === 0 && <div style={{ fontSize:"13px", color:"var(--txt-4)" }}>Aucune invitation générée.</div>}
+              {invites.length === 0 && <div style={{ fontSize:"13px", color:"var(--txt-4)" }}>{t('invite.noInvites')}</div>}
               {invites.map(inv => {
                 const used = !!inv.usedAt;
                 const expired = inv.expired || new Date(inv.expiresAt) < new Date();
                 const statusColor = used ? "var(--green)" : expired ? "var(--txt-4)" : "var(--gold)";
-                const statusLabel = used ? "Utilisé" : expired ? "Expiré" : "Actif";
+                const statusLabel = used ? t('invite.used') : expired ? t('invite.expired') : t('invite.active');
                 return (
                   <div key={inv.token} style={{ display:"flex", alignItems:"center", gap:8, padding:"11px 0", borderBottom:"1px solid var(--line-soft)" }}>
                     <div style={{ flex:1, minWidth:0 }}>
@@ -1390,14 +1403,14 @@ export default function CoachDashboard() {
                         <span style={{ color: statusColor }}>{statusLabel}</span>
                       </div>
                       <div style={{ fontSize:"11.5px", color:"var(--txt-4)", marginTop:3 }}>
-                        {new Date(inv.createdAt).toLocaleDateString('fr-FR')} → exp. {new Date(inv.expiresAt).toLocaleDateString('fr-FR')}
-                        {used && inv.usedAt && ` · utilisé le ${new Date(inv.usedAt).toLocaleDateString('fr-FR')}`}
+                        {new Date(inv.createdAt).toLocaleDateString(intlLocale(locale))} {t('invite.expiresArrow', { date: new Date(inv.expiresAt).toLocaleDateString(intlLocale(locale)) })}
+                        {used && inv.usedAt && ` ${t('invite.usedOn', { date: new Date(inv.usedAt).toLocaleDateString(intlLocale(locale)) })}`}
                       </div>
                     </div>
                     {!used && !expired && (
                       <button onClick={()=>copyInviteLink(inv.token)}
                         style={{ background:"transparent", border:"1px solid var(--line-gold)", borderRadius:7, padding:"5px 11px", color: copied===`link-${inv.token}`?"var(--green)":"var(--gold)", fontSize:"11px", cursor:"pointer", whiteSpace:"nowrap" }}>
-                        {copied===`link-${inv.token}` ? "✓ Copié" : "Copier le lien"}
+                        {copied===`link-${inv.token}` ? t('invite.copied') : t('invite.copyLink')}
                       </button>
                     )}
                     {!used && (
@@ -1414,57 +1427,57 @@ export default function CoachDashboard() {
         {/* ─── Message groupé ─── */}
         <button onClick={()=>{ setBroadcastOpen(true); setBroadcastResult(null); setBroadcastAll(true); setBroadcastIds([]); }}
           className="cx-btn" style={{ width:"100%", padding:"12px", marginBottom:18, background:"#1f1b13", border:"1px solid var(--line-gold)", color:"var(--gold)", fontSize:"13.5px" }}>
-          📢 Message groupé
+          {t('broadcast.openBtn')}
         </button>
 
         {/* ─── Bibliothèque de programmes ─── */}
         <div className="cx-card cx-pad" style={{ marginBottom:18 }}>
           <button onClick={()=>setTemplatesOpen(o=>!o)} style={{ width:"100%", background:"none", border:"none", display:"flex", justifyContent:"space-between", alignItems:"center", cursor:"pointer", padding:0 }}>
-            <div className="t-eyebrow gold">📚 Bibliothèque{templates.length>0 && <span style={{ color:"var(--txt-3)" }}> · {templates.length}</span>}</div>
+            <div className="t-eyebrow gold">{t('library.title')}{templates.length>0 && <span style={{ color:"var(--txt-3)" }}> · {templates.length}</span>}</div>
             <span style={{ fontSize:"12px", color:"var(--txt-4)" }}>{templatesOpen?"▲":"▼"}</span>
           </button>
           {templatesOpen && (() => {
             const filtered = templates
-              .filter(t => libFilter==='all' || t.type===libFilter)
-              .filter(t => !libSearch.trim() || (t.name||'').toLowerCase().includes(libSearch.trim().toLowerCase()));
+              .filter(tpl => libFilter==='all' || tpl.type===libFilter)
+              .filter(tpl => !libSearch.trim() || (tpl.name||'').toLowerCase().includes(libSearch.trim().toLowerCase()));
             const selName = selectedId ? (athletes.find(x=>x.id===selectedId)?.name || '') : '';
             return (
             <div style={{ marginTop:16 }}>
               {/* Recherche */}
-              <input value={libSearch} onChange={e=>setLibSearch(e.target.value)} placeholder="Rechercher un modèle…" className="cx-in"
+              <input value={libSearch} onChange={e=>setLibSearch(e.target.value)} placeholder={t('library.searchPh')} className="cx-in"
                 style={{ width:"100%", marginBottom:12 }}/>
               {/* Filtre par type */}
               <div style={{ display:"flex", gap:8, marginBottom:16 }}>
-                {[{k:'all',l:'Tous'},{k:'nutrition',l:'Nutrition'},{k:'muscu',l:'Muscu'}].map(f=>(
+                {[{k:'all',l:t('library.filterAll')},{k:'nutrition',l:t('library.filterNutrition')},{k:'muscu',l:t('library.filterMuscu')}].map(f=>(
                   <button key={f.k} onClick={()=>setLibFilter(f.k)} className={`cx-chip${libFilter===f.k?' sel':''}`} style={{ flex:1, padding:"8px 0" }}>{f.l}</button>
                 ))}
               </div>
               {/* Hint cible */}
               <div style={{ fontSize:"11.5px", color: selectedId?"var(--txt-3)":"var(--amber)", marginBottom:12, lineHeight:1.5 }}>
-                {selectedId ? <>Appliquer sur · <span style={{ color:"var(--gold)" }}>{selName}</span></> : "Sélectionne d'abord un athlète pour appliquer"}
+                {selectedId ? <>{t('library.targetPrefix')} <span style={{ color:"var(--gold)" }}>{selName}</span></> : t('library.selectFirst')}
               </div>
               {/* Liste */}
               {filtered.length === 0 ? (
                 <div style={{ fontSize:"13px", color:"var(--txt-3)", textAlign:"center", padding:"20px 0", lineHeight:1.6, whiteSpace:"pre-line" }}>
-                  {templates.length===0 ? "Aucun modèle enregistré.\nGénère un programme puis « Sauver »." : "Aucun modèle ne correspond."}
+                  {templates.length===0 ? t('library.noTemplates') : t('library.noMatch')}
                 </div>
-              ) : filtered.map(t => (
-                <div key={t.id} style={{ padding:"13px 0", borderBottom:"1px solid var(--line-soft)" }}>
+              ) : filtered.map(tpl => (
+                <div key={tpl.id} style={{ padding:"13px 0", borderBottom:"1px solid var(--line-soft)" }}>
                   <div style={{ display:"flex", alignItems:"flex-start", gap:10 }}>
-                    <span style={{ fontSize:"17px", lineHeight:1.3 }}>{t.type==='nutrition'?'🥗':'💪'}</span>
+                    <span style={{ fontSize:"17px", lineHeight:1.3 }}>{tpl.type==='nutrition'?'🥗':'💪'}</span>
                     <div style={{ flex:1, minWidth:0 }}>
-                      <div style={{ fontFamily:"var(--serif)", fontSize:"15px", fontWeight:600, color:"var(--cream)", overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{t.name}</div>
-                      <div style={{ fontSize:"11.5px", color:"var(--txt-4)", marginTop:3 }}>{t.type==='nutrition'?'Nutrition':'Muscu'} · {new Date(t.createdAt).toLocaleDateString('fr-FR')}</div>
-                      {t.description && <div style={{ fontSize:"12px", color:"var(--txt-3)", marginTop:5, lineHeight:1.5 }}>{t.description}</div>}
+                      <div style={{ fontFamily:"var(--serif)", fontSize:"15px", fontWeight:600, color:"var(--cream)", overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{tpl.name}</div>
+                      <div style={{ fontSize:"11.5px", color:"var(--txt-4)", marginTop:3 }}>{tpl.type==='nutrition'?t('library.filterNutrition'):t('library.filterMuscu')} · {new Date(tpl.createdAt).toLocaleDateString(intlLocale(locale))}</div>
+                      {tpl.description && <div style={{ fontSize:"12px", color:"var(--txt-3)", marginTop:5, lineHeight:1.5 }}>{tpl.description}</div>}
                     </div>
-                    <button onClick={()=>deleteTemplate(t.id)} title="Supprimer" style={{ background:"none", border:"none", color:"var(--txt-4)", fontSize:"15px", cursor:"pointer", padding:"2px 4px", lineHeight:1 }}>🗑</button>
+                    <button onClick={()=>deleteTemplate(tpl.id)} title={t('library.deleteTitle')} style={{ background:"none", border:"none", color:"var(--txt-4)", fontSize:"15px", cursor:"pointer", padding:"2px 4px", lineHeight:1 }}>🗑</button>
                   </div>
-                  <button onClick={()=>applyTemplateFromLibrary(t)} disabled={!selectedId || libApplying===t.id}
+                  <button onClick={()=>applyTemplateFromLibrary(tpl)} disabled={!selectedId || libApplying===tpl.id}
                     className="cx-btn" style={{ width:"100%", marginTop:10, padding:"9px 0", background:"transparent",
                       border:`1px solid ${selectedId? "var(--line-gold)" : "var(--line)"}`,
-                      color: selectedId ? (t.type==='nutrition'?"var(--green)":"var(--violet)") : "var(--txt-4)",
-                      fontSize:"12.5px", cursor: selectedId?"pointer":"not-allowed", opacity:libApplying===t.id?0.6:1 }}>
-                    {libApplying===t.id ? "Application…" : "Appliquer"}
+                      color: selectedId ? (tpl.type==='nutrition'?"var(--green)":"var(--violet)") : "var(--txt-4)",
+                      fontSize:"12.5px", cursor: selectedId?"pointer":"not-allowed", opacity:libApplying===tpl.id?0.6:1 }}>
+                    {libApplying===tpl.id ? t('library.applying') : t('library.apply')}
                   </button>
                 </div>
               ))}
@@ -1475,7 +1488,7 @@ export default function CoachDashboard() {
 
         {/* Période rapport */}
         <div style={{ display:"flex", gap:8, marginBottom:20, alignItems:"center" }}>
-          <div className="t-label" style={{ marginRight:4 }}>Rapport</div>
+          <div className="t-label" style={{ marginRight:4 }}>{t('reportPeriod.label')}</div>
           {[7,30,90].map(d=>(
             <button key={d} onClick={()=>setReportDays(d)} className="cx-tile"
               style={{ flex:1, padding:"9px", fontSize:"13px", ...(reportDays===d ? { borderColor:"var(--gold)", color:"var(--gold)" } : {}) }}>
@@ -1486,21 +1499,22 @@ export default function CoachDashboard() {
 
         {/* ─── À surveiller ─── */}
         {!loading && athletes.length > 0 && (() => {
+          const alertText = (a) => a.alertCode ? t(`alerts.${a.alertCode}`) : a.alert;
           const flags = athletes.flatMap(a => {
             const items = [];
-            if (a.activeDays7j === 0) items.push({ name: a.name, id: a.id, msg: 'Aucune saisie depuis 7 jours', level: 'bad' });
-            else if (a.activeDays7j <= 2) items.push({ name: a.name, id: a.id, msg: `Seulement ${a.activeDays7j}/7 jours loggés`, level: 'warn' });
-            if (a.alert) items.push({ name: a.name, id: a.id, msg: a.alert, level: 'warn' });
-            if (a.blood?.abnormal?.length > 0) items.push({ name: a.name, id: a.id, msg: `${a.blood.abnormal.length} marqueur${a.blood.abnormal.length>1?'s':''} anormal${a.blood.abnormal.length>1?'s':''}`, level: 'warn' });
-            if (a.reportRequest) items.push({ name: a.name, id: a.id, msg: 'Demande de rapport en attente', level: 'info' });
-            if (a.pendingBlood) items.push({ name: a.name, id: a.id, msg: 'Bilan sanguin à analyser', level: 'info' });
-            if (a.mediaUnseen > 0) items.push({ name: a.name, id: a.id, msg: `${a.mediaUnseen} suivi photo/vidéo à voir`, level: 'info' });
+            if (a.activeDays7j === 0) items.push({ name: a.name, id: a.id, msg: t('watch.noEntry7d'), level: 'bad' });
+            else if (a.activeDays7j <= 2) items.push({ name: a.name, id: a.id, msg: t('watch.onlyXOf7', { n: a.activeDays7j }), level: 'warn' });
+            if (a.alert) items.push({ name: a.name, id: a.id, msg: alertText(a), level: 'warn' });
+            if (a.blood?.abnormal?.length > 0) items.push({ name: a.name, id: a.id, msg: t('watch.abnormalMarkers', { count: a.blood.abnormal.length, n: a.blood.abnormal.length }), level: 'warn' });
+            if (a.reportRequest) items.push({ name: a.name, id: a.id, msg: t('watch.reportRequestPending'), level: 'info' });
+            if (a.pendingBlood) items.push({ name: a.name, id: a.id, msg: t('watch.bloodPending'), level: 'info' });
+            if (a.mediaUnseen > 0) items.push({ name: a.name, id: a.id, msg: t('watch.mediaToView', { count: a.mediaUnseen, n: a.mediaUnseen }), level: 'info' });
             return items;
           });
           if (flags.length === 0) return null;
           return (
             <div className="cx-card cx-pad" style={{ marginBottom:20 }}>
-              <div className="t-eyebrow amber" style={{ marginBottom:16 }}>À surveiller · {flags.length} alerte{flags.length>1?'s':''}</div>
+              <div className="t-eyebrow amber" style={{ marginBottom:16 }}>{t('watch.title')} · {t('watch.alertCount', { count: flags.length, n: flags.length })}</div>
               {flags.map((f, i) => (
                 <div key={i} onClick={()=>selectAthlete(f.id)}
                   style={{ display:"flex", alignItems:"center", gap:12, padding:"11px 0", borderBottom: i<flags.length-1?"1px solid var(--line-soft)":"none", cursor:"pointer" }}>
@@ -1517,22 +1531,22 @@ export default function CoachDashboard() {
         })()}
 
         {/* Liste compacte des athlètes (sidebar) */}
-        <div className="t-label" style={{ margin:"10px 2px 12px" }}>Athlètes · {athletes.length}</div>
+        <div className="t-label" style={{ margin:"10px 2px 12px" }}>{t('sidebar.athletesCount', { n: athletes.length })}</div>
         {!loading && athletes.length > 0 && (
           <>
-            <input value={athleteSearch} onChange={e=>setAthleteSearch(e.target.value)} placeholder="Rechercher un athlète…" className="cx-in"
+            <input value={athleteSearch} onChange={e=>setAthleteSearch(e.target.value)} placeholder={t('sidebar.searchPh')} className="cx-in"
               style={{ width:"100%", marginBottom:10 }}/>
             <div style={{ display:"flex", gap:6, marginBottom:14 }}>
-              {[{k:'alert',l:'Alerte'},{k:'inactive',l:'Inactifs'},{k:'az',l:'A-Z'}].map(s=>(
+              {[{k:'alert',l:t('sidebar.sortAlert')},{k:'inactive',l:t('sidebar.sortInactive')},{k:'az',l:t('sidebar.sortAZ')}].map(s=>(
                 <button key={s.k} onClick={()=>setAthleteSort(s.k)} className={`cx-chip${athleteSort===s.k?' sel':''}`} style={{ flex:1, padding:"7px 0", fontSize:"12px" }}>{s.l}</button>
               ))}
             </div>
           </>
         )}
         {loading ? (
-          <div style={{ color:"var(--txt-4)", fontSize:"13.5px", padding:"12px 0" }}>Chargement…</div>
+          <div style={{ color:"var(--txt-4)", fontSize:"13.5px", padding:"12px 0" }}>{t('sidebar.loading')}</div>
         ) : athletes.length === 0 ? (
-          <div style={{ color:"var(--txt-4)", fontSize:"13px", padding:"12px 0", lineHeight:1.8 }}>Aucun élève lié.<br/>Partage ton code.</div>
+          <div style={{ color:"var(--txt-4)", fontSize:"13px", padding:"12px 0", lineHeight:1.8 }}>{t('sidebar.noStudents')}<br/>{t('sidebar.shareCode')}</div>
         ) : (() => {
           const isFlagged = a => !!a.alert || (a.blood?.abnormal?.length > 0) || a.activeDays7j <= 2;
           let list = athletes.filter(a => !athleteSearch.trim() || (a.name||'').toLowerCase().includes(athleteSearch.trim().toLowerCase()));
@@ -1544,23 +1558,24 @@ export default function CoachDashboard() {
             if (fa !== fb) return fa - fb;
             return (a.activeDays7j||0) - (b.activeDays7j||0);
           });
-          if (list.length === 0) return <div style={{ color:"var(--txt-3)", fontSize:"13px", padding:"12px 2px" }}>Aucun athlète ne correspond.</div>;
+          if (list.length === 0) return <div style={{ color:"var(--txt-3)", fontSize:"13px", padding:"12px 2px" }}>{t('sidebar.noMatch')}</div>;
           return list.map(a => {
             const sel = selectedId===a.id;
             const actColor = a.activeDays7j>=5?"var(--green)":a.activeDays7j>=3?"var(--amber)":"var(--red)";
+            const alertText = a.alertCode ? t(`alerts.${a.alertCode}`) : a.alert;
             return (
             <div key={a.id} className={`cx-row${sel?' sel':''}`} onClick={()=>selectAthlete(a.id)}>
               <div className="cx-av">{(a.name||'?').trim().charAt(0).toUpperCase()}</div>
               <div style={{ flex:1, minWidth:0 }}>
                 <div style={{ fontSize:"15px", color: sel?"var(--cream)":"var(--txt)", overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{a.name}</div>
                 <div style={{ fontSize:"11px", color:"var(--txt-3)", marginTop:4, display:"flex", alignItems:"center", gap:6 }}>
-                  <span>{a.avgKcal7j} kcal/j</span>
+                  <span>{t('sidebar.kcalPerDay', { n: a.avgKcal7j })}</span>
                   <span style={{ color:"var(--line-gold)" }}>·</span>
-                  <span style={{ color:actColor }}>{a.activeDays7j}/7 actifs</span>
+                  <span style={{ color:actColor }}>{t('sidebar.activeOf7', { n: a.activeDays7j })}</span>
                 </div>
               </div>
-              {a.alert && <span title={a.alert} style={{ width:7, height:7, borderRadius:"50%", background:"var(--amber)", flexShrink:0 }}/>}
-              {a.mediaUnseen > 0 && <span className="cx-badge" title="Nouveau suivi photo/vidéo" style={{ minWidth:18, height:18, padding:"0 5px", background:"#3a2f1a", color:"var(--gold)", border:"1px solid var(--line-gold)" }}>📸 {a.mediaUnseen}</span>}
+              {a.alert && <span title={alertText} style={{ width:7, height:7, borderRadius:"50%", background:"var(--amber)", flexShrink:0 }}/>}
+              {a.mediaUnseen > 0 && <span className="cx-badge" title={t('header.newMediaTitle')} style={{ minWidth:18, height:18, padding:"0 5px", background:"#3a2f1a", color:"var(--gold)", border:"1px solid var(--line-gold)" }}>📸 {a.mediaUnseen}</span>}
               {chatUnread[a.id] > 0 && <span className="cx-badge red" style={{ minWidth:18, height:18, padding:"0 4px" }}>{chatUnread[a.id]}</span>}
             </div>
             );
@@ -1571,15 +1586,16 @@ export default function CoachDashboard() {
 
         <main className="cx-main">
         {loading ? (
-          <div className="cx-empty">Chargement…</div>
+          <div className="cx-empty">{t('mainEmpty.loading')}</div>
         ) : athletes.length === 0 ? (
-          <div className="cx-empty"><div style={{ fontSize:"36px", marginBottom:6 }}>🫂</div><div style={{ fontFamily:"var(--serif)", fontSize:"22px", color:"var(--gold-dim)" }}>Aucun élève lié</div>Partage ton code d'invitation pour ajouter un athlète.</div>
+          <div className="cx-empty"><div style={{ fontSize:"36px", marginBottom:6 }}>🫂</div><div style={{ fontFamily:"var(--serif)", fontSize:"22px", color:"var(--gold-dim)" }}>{t('mainEmpty.noStudentsTitle')}</div>{t('mainEmpty.noStudentsDesc')}</div>
         ) : !selectedId ? (
-          <div className="cx-empty"><div style={{ fontSize:"36px", marginBottom:6 }}>📋</div><div style={{ fontFamily:"var(--serif)", fontSize:"22px", color:"var(--gold-dim)" }}>Sélectionne un athlète</div>Choisis un athlète à gauche pour voir son suivi détaillé.</div>
+          <div className="cx-empty"><div style={{ fontSize:"36px", marginBottom:6 }}>📋</div><div style={{ fontFamily:"var(--serif)", fontSize:"22px", color:"var(--gold-dim)" }}>{t('mainEmpty.selectTitle')}</div>{t('mainEmpty.selectDesc')}</div>
         ) : athletes.filter(a => a.id === selectedId).map(a => {
           const kcalPct = a.goalKcal > 0 ? Math.min(100, Math.round(a.todayKcal / a.goalKcal * 100)) : 0;
           const avg7Pct = a.goalKcal > 0 ? Math.round(a.avgKcal7j / a.goalKcal * 100) : 0;
           const protPct = a.goalProtein > 0 ? Math.min(100, Math.round(a.avgProtein7j / a.goalProtein * 100)) : 0;
+          const alertText = a.alertCode ? t(`alerts.${a.alertCode}`) : a.alert;
           return (
             <div key={a.id} className="cx-fiche cx-card" style={{ border:`1px solid ${a.alert?"#4a3128":"var(--line-soft)"}`, borderRadius:"var(--r-lg)", marginBottom:12, boxShadow:"var(--sh-card)", overflow:"hidden" }}>
 
@@ -1594,7 +1610,7 @@ export default function CoachDashboard() {
                       <div style={{ fontSize:"13px", color:"var(--txt-3)", marginTop:6, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{a.email}</div>
                       {a.alert && (
                         <div style={{ display:"inline-block", fontSize:"12px", color:"var(--red)", background:"#1c1010", border:"1px solid #4a2a2a", borderRadius:6, padding:"3px 9px", marginTop:8 }}>
-                          {a.alert}
+                          {alertText}
                         </div>
                       )}
                     </div>
@@ -1602,9 +1618,9 @@ export default function CoachDashboard() {
                   {/* Droite : 3 stats compactes */}
                   <div className="cx-fiche-stats" style={{ display:"flex", alignItems:"flex-start", gap:24, flexShrink:0 }}>
                     {[
-                      { v:`${kcalPct}%`, l:"Aujourd'hui", c: kcalPct>90?"var(--green)":kcalPct>60?"var(--amber)":"var(--red)" },
-                      { v:`${avg7Pct}%`, l:"Moy 7j", c: avg7Pct>85&&avg7Pct<115?"var(--green)":"var(--amber)" },
-                      { v:`${a.activeDays7j}/7`, l:"Actifs", c: a.activeDays7j>=5?"var(--green)":a.activeDays7j>=3?"var(--amber)":"var(--red)" },
+                      { v:`${kcalPct}%`, l:t('ficheStats.today'), c: kcalPct>90?"var(--green)":kcalPct>60?"var(--amber)":"var(--red)" },
+                      { v:`${avg7Pct}%`, l:t('ficheStats.avg7d'), c: avg7Pct>85&&avg7Pct<115?"var(--green)":"var(--amber)" },
+                      { v:`${a.activeDays7j}/7`, l:t('ficheStats.active'), c: a.activeDays7j>=5?"var(--green)":a.activeDays7j>=3?"var(--amber)":"var(--red)" },
                     ].map((s,i)=>(
                       <div key={i} style={{ textAlign:"right", minWidth:36 }}>
                         <div style={{ fontFamily:"var(--serif)", fontSize:"26px", color:s.c, fontWeight:600, lineHeight:1 }}>{s.v}</div>
@@ -1628,36 +1644,36 @@ export default function CoachDashboard() {
                   {/* Stats 7j */}
                   <div style={{ display:"flex", gap:14, marginTop:24 }}>
                     <div className="cx-kpi">
-                      <div className="k-lbl">Moy kcal · 7j</div>
+                      <div className="k-lbl">{t('kpi.avgKcal7d')}</div>
                       <div className="k-val" style={{ color: avg7Pct>85&&avg7Pct<115?"var(--green)":"var(--amber)" }}>{a.avgKcal7j}</div>
-                      <div className="k-sub">objectif {a.goalKcal}</div>
+                      <div className="k-sub">{t('kpi.goalPrefix', { n: a.goalKcal })}</div>
                     </div>
                     <div className="cx-kpi">
-                      <div className="k-lbl">Protéines moy</div>
+                      <div className="k-lbl">{t('kpi.avgProtein')}</div>
                       <div className="k-val" style={{ color: protPct>85?"var(--green)":"var(--red)" }}>{a.avgProtein7j}g</div>
-                      <div className="k-sub">objectif {a.goalProtein}g</div>
+                      <div className="k-sub">{t('kpi.goalPrefix', { n: `${a.goalProtein}g` })}</div>
                     </div>
                     <div className="cx-kpi">
-                      <div className="k-lbl">Jours actifs</div>
+                      <div className="k-lbl">{t('kpi.activeDays')}</div>
                       <div className="k-val" style={{ color:"var(--gold)" }}>{a.activeDays7j}<span style={{ fontSize:"16px", color:"var(--txt-4)" }}>/7</span></div>
-                      <div className="k-sub">7 derniers jours</div>
+                      <div className="k-sub">{t('kpi.last7Days')}</div>
                     </div>
                   </div>
 
                   {/* ── (2) Nutrition & Poids ── */}
-                  <div className="cx-group-hd"><span className="lbl">Nutrition &amp; Poids</span><span className="ln"/></div>
+                  <div className="cx-group-hd"><span className="lbl">{t('groups.nutritionWeight')}</span><span className="ln"/></div>
 
                   {/* Tendance kcal 7j (sparkline) */}
                   {Array.isArray(a.kcalSeries) && a.kcalSeries.filter(v=>typeof v==='number').length >= 2 && (
                     <div className="cx-inner" style={{ padding:"18px 20px", marginBottom:16 }}>
                       <div style={{ display:"flex", justifyContent:"space-between", alignItems:"baseline", marginBottom:12 }}>
-                        <span className="t-eyebrow">Tendance kcal</span>
-                        <span style={{ fontSize:"11.5px", color:"var(--txt-3)" }}>kcal/jour · 7 jours</span>
+                        <span className="t-eyebrow">{t('trend.kcalTrend')}</span>
+                        <span style={{ fontSize:"11.5px", color:"var(--txt-3)" }}>{t('trend.kcalPerDay7d')}</span>
                       </div>
                       <Sparkline values={a.kcalSeries} goal={a.goalKcal} color="#c8b890" height={72} />
                       {a.goalKcal > 0 && (
                         <div style={{ fontSize:"11px", color:"var(--txt-4)", marginTop:8, display:"flex", alignItems:"center", gap:6 }}>
-                          <span style={{ display:"inline-block", width:14, height:0, borderTop:"1px dashed #5a5446" }} /> objectif {a.goalKcal} kcal
+                          <span style={{ display:"inline-block", width:14, height:0, borderTop:"1px dashed #5a5446" }} /> {t('trend.goalKcal', { n: a.goalKcal })}
                         </div>
                       )}
                     </div>
@@ -1681,20 +1697,21 @@ export default function CoachDashboard() {
                       trendBd = good ? '#2a5a2a' : '#5a2a2a';
                       sparkCol = good ? '#86c896' : '#d28484';
                     }
+                    const trendWord = gaining ? t('weightPanel.trendGain') : losing ? t('weightPanel.trendLoss') : t('weightPanel.trendMaintain');
                     return (
                     <div className="cx-inner" style={{ padding:"18px 20px", marginBottom:16 }}>
                       <div style={{ display:"flex", alignItems:"center", gap:14 }}>
                         <span style={{ fontFamily:"var(--serif)", fontSize:"26px", fontWeight:600, color:"var(--cream)" }}>{a.lastWeight}<span style={{ fontSize:"14px", fontFamily:"var(--sans)", color:"var(--txt-3)", marginLeft:4 }}>kg</span></span>
                         {a.weightTrend !== null && (
                           <span style={{ fontSize:"13px", color: trendCol, border:`1px solid ${trendBd}`, borderRadius:7, padding:"4px 11px" }}>
-                            {a.weightTrend > 0 ? '+' : ''}{a.weightTrend} kg{md ? <span style={{ color:"var(--txt-4)", marginLeft:6 }}>· {gaining ? 'prise de masse' : losing ? 'perte' : 'maintien'}</span> : null}
+                            {a.weightTrend > 0 ? '+' : ''}{a.weightTrend} kg{md ? <span style={{ color:"var(--txt-4)", marginLeft:6 }}>· {trendWord}</span> : null}
                           </span>
                         )}
                       </div>
                       {wpts.length >= 2 && (
                         <div style={{ marginTop:14 }}>
                           <Sparkline values={wpts} color={sparkCol} height={64} />
-                          <div style={{ fontSize:"11px", color:"var(--txt-4)", marginTop:6 }}>poids · {wpts.length} relevés</div>
+                          <div style={{ fontSize:"11px", color:"var(--txt-4)", marginTop:6 }}>{t('weightPanel.pointsCount', { n: wpts.length })}</div>
                         </div>
                       )}
                     </div>
@@ -1702,12 +1719,12 @@ export default function CoachDashboard() {
                   })()}
 
                   {/* ── (3) Entraînement & Récupération ── */}
-                  <div className="cx-group-hd"><span className="lbl">Entraînement &amp; Récupération</span><span className="ln"/></div>
+                  <div className="cx-group-hd"><span className="lbl">{t('groups.trainingRecovery')}</span><span className="ln"/></div>
 
                   {/* Séances Strava (7 j) — carte détaillée par séance */}
                   {a.strava?.sessions?.length > 0 && (() => {
                     const sess = a.strava.sessions;
-                    const isRide = (t) => /ride|vélo|velo|cycl|bike|vtt/i.test(`${t?.type || ''} ${t?.typeLabel || ''}`);
+                    const isRide = (tp) => /ride|vélo|velo|cycl|bike|vtt/i.test(`${tp?.type || ''} ${tp?.typeLabel || ''}`);
                     const fmtDur = (sec) => {
                       if (sec == null) return null;
                       const h = Math.floor(sec / 3600), m = Math.round((sec % 3600) / 60);
@@ -1715,26 +1732,26 @@ export default function CoachDashboard() {
                     };
                     const fmtPace = (s, ride) => {
                       if (s.avg_speed == null || s.avg_speed <= 0) return null;
-                      if (ride) return { v:`${(s.avg_speed * 3.6).toFixed(1)} km/h`, l:'Vitesse' };
+                      if (ride) return { v:`${(s.avg_speed * 3.6).toFixed(1)} km/h`, l:t('training.speed') };
                       const secPerKm = 1000 / s.avg_speed;
                       const mm = Math.floor(secPerKm / 60), ss = Math.round(secPerKm % 60);
-                      return { v:`${mm}:${String(ss).padStart(2,'0')}/km`, l:'Allure' };
+                      return { v:`${mm}:${String(ss).padStart(2,'0')}/km`, l:t('training.pace') };
                     };
-                    const totalElev = sess.reduce((t,s) => t + (s.elevation_gain || 0), 0);
-                    const totalLoad = sess.reduce((t,s) => t + (s.suffer_score || 0), 0);
+                    const totalElev = sess.reduce((s2,s) => s2 + (s.elevation_gain || 0), 0);
+                    const totalLoad = sess.reduce((s2,s) => s2 + (s.suffer_score || 0), 0);
                     return (
                     <div className="cx-inner" style={{ padding:"20px", marginBottom:14 }}>
                       <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:14 }}>
-                        <span className="t-eyebrow">🏃 Séances Strava (7 j)</span>
-                        {(() => { const s = timeAgo(a.strava.updatedAt); return s ? (
-                          <span style={{ fontSize:"11px", color: s.stale ? "var(--amber)" : "var(--txt-4)" }}>Synchronisé {s.label}</span>
+                        <span className="t-eyebrow">{t('training.sessions7d')}</span>
+                        {(() => { const s = timeAgo(a.strava.updatedAt, t); return s ? (
+                          <span style={{ fontSize:"11px", color: s.stale ? "var(--amber)" : "var(--txt-4)" }}>{t('training.synced', { label: s.label })}</span>
                         ) : null; })()}
                       </div>
                       {/* Résumé 7j */}
                       <div style={{ display:"flex", flexWrap:"wrap", gap:"14px 24px", paddingBottom:16, marginBottom:16, borderBottom:"1px solid var(--line-soft)" }}>
-                        <RecStat label="Séances 7j" value={sess.length} />
-                        {totalElev > 0 && <RecStat label="Dénivelé tot." value={`${Math.round(totalElev)} m`} />}
-                        {totalLoad > 0 && <RecStat label="Charge cumulée" value={Math.round(totalLoad)} />}
+                        <RecStat label={t('training.sessionsCount')} value={sess.length} />
+                        {totalElev > 0 && <RecStat label={t('training.totalElevation')} value={`${Math.round(totalElev)} m`} />}
+                        {totalLoad > 0 && <RecStat label={t('training.totalLoad')} value={Math.round(totalLoad)} />}
                       </div>
                       {/* Une mini-carte par séance */}
                       <div style={{ display:"flex", flexDirection:"column", gap:12 }}>
@@ -1742,16 +1759,16 @@ export default function CoachDashboard() {
                           const ride = isRide(s);
                           const pace = fmtPace(s, ride);
                           const metrics = [
-                            fmtDur(s.duration) && { l:'Durée', v: fmtDur(s.duration) },
-                            s.distance != null && { l:'Distance', v:`${(s.distance / 1000).toFixed(1)} km` },
+                            fmtDur(s.duration) && { l:t('training.duration'), v: fmtDur(s.duration) },
+                            s.distance != null && { l:t('training.distance'), v:`${(s.distance / 1000).toFixed(1)} km` },
                             pace && { l: pace.l, v: pace.v },
-                            s.elevation_gain != null && s.elevation_gain > 0 && { l:'Dénivelé', v:`${Math.round(s.elevation_gain)} m` },
-                            s.avg_hr != null && { l:'FC moy', v:`${Math.round(s.avg_hr)} bpm` },
-                            s.max_hr != null && { l:'FC max', v:`${Math.round(s.max_hr)} bpm` },
-                            s.avg_cadence != null && { l:'Cadence', v: Math.round(s.avg_cadence) },
-                            s.avg_watts != null && { l:'Puissance', v:`${Math.round(s.avg_watts)} W` },
-                            s.suffer_score != null && { l:'Effort rel.', v: Math.round(s.suffer_score) },
-                            s.caloriesAdjusted != null && { l:'Calories', v:`${Math.round(s.caloriesAdjusted)} kcal` },
+                            s.elevation_gain != null && s.elevation_gain > 0 && { l:t('training.elevation'), v:`${Math.round(s.elevation_gain)} m` },
+                            s.avg_hr != null && { l:t('training.avgHR'), v:`${Math.round(s.avg_hr)} bpm` },
+                            s.max_hr != null && { l:t('training.maxHR'), v:`${Math.round(s.max_hr)} bpm` },
+                            s.avg_cadence != null && { l:t('training.cadence'), v: Math.round(s.avg_cadence) },
+                            s.avg_watts != null && { l:t('training.power'), v:`${Math.round(s.avg_watts)} W` },
+                            s.suffer_score != null && { l:t('training.relEffort'), v: Math.round(s.suffer_score) },
+                            s.caloriesAdjusted != null && { l:t('training.calories'), v:`${Math.round(s.caloriesAdjusted)} kcal` },
                           ].filter(Boolean);
                           return (
                             <div key={s.id ?? i} style={{ padding:"14px 16px", borderRadius:10, background:"var(--line-soft)" }}>
@@ -1779,23 +1796,23 @@ export default function CoachDashboard() {
                   {a.recovery && (a.recovery.sleep != null || a.recovery.restingHR != null || a.recovery.avgHR != null || a.recovery.maxHR != null || a.recovery.hrv != null || a.recovery.spo2 != null || a.recovery.steps != null) && (
                     <div className="cx-inner" style={{ border:`1px solid ${a.recovery.flag==='low'?'#5a2a2a':a.recovery.flag==='warn'?'#5a4a2a':'var(--line-soft)'}`, padding:"20px", marginBottom:14 }}>
                       <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom: 4 }}>
-                        <span className="t-eyebrow">💤 Récupération</span>
+                        <span className="t-eyebrow">{t('recovery.title')}</span>
                         <span style={{ fontSize:"11.5px", color: a.recovery.flag==='low'?'var(--red)':a.recovery.flag==='warn'?'var(--amber)':'var(--green)' }}>
-                          {a.recovery.flag==='low'?'● faible':a.recovery.flag==='warn'?'● à surveiller':'● bonne'}
+                          {a.recovery.flag==='low'?t('recovery.low'):a.recovery.flag==='warn'?t('recovery.warn'):t('recovery.good')}
                         </span>
                       </div>
-                      {(() => { const s = timeAgo(a.recovery.syncedAt); return s ? (
-                        <div style={{ fontSize:"11px", color: s.stale ? "var(--amber)" : "var(--txt-4)", marginBottom:12 }}>Synchronisé {s.label}</div>
+                      {(() => { const s = timeAgo(a.recovery.syncedAt, t); return s ? (
+                        <div style={{ fontSize:"11px", color: s.stale ? "var(--amber)" : "var(--txt-4)", marginBottom:12 }}>{t('recovery.synced', { label: s.label })}</div>
                       ) : <div style={{ marginBottom:8 }} />; })()}
                       <div style={{ display:"flex", flexWrap:"wrap", gap:"14px 20px" }}>
-                        {a.recovery.sleep != null && <RecStat label="Sommeil" value={`${a.recovery.sleep} h`} />}
-                        {a.recovery.sleepStages && (() => { const s=a.recovery.sleepStages; const t=(s.deep||0)+(s.light||0)+(s.rem||0); return t>0 ? <RecStat label="Profond" value={`${Math.round(s.deep/t*100)}%`} /> : null; })()}
-                        {a.recovery.restingHR != null && <RecStat label="FC repos" value={`${a.recovery.restingHR} bpm`} />}
-                        {a.recovery.avgHR != null && <RecStat label="FC moy" value={`${a.recovery.avgHR} bpm`} />}
-                        {a.recovery.maxHR != null && <RecStat label="FC max" value={`${a.recovery.maxHR} bpm`} />}
-                        {a.recovery.hrv != null && <RecStat label="HRV" value={`${a.recovery.hrv} ms`} />}
-                        {a.recovery.spo2 != null && <RecStat label="SpO₂" value={`${a.recovery.spo2}%`} />}
-                        {a.recovery.steps != null && <RecStat label="Pas/j" value={a.recovery.steps.toLocaleString('fr-FR')} />}
+                        {a.recovery.sleep != null && <RecStat label={t('recovery.sleep')} value={`${a.recovery.sleep} h`} />}
+                        {a.recovery.sleepStages && (() => { const s=a.recovery.sleepStages; const tot=(s.deep||0)+(s.light||0)+(s.rem||0); return tot>0 ? <RecStat label={t('recovery.deepSleep')} value={`${Math.round(s.deep/tot*100)}%`} /> : null; })()}
+                        {a.recovery.restingHR != null && <RecStat label={t('recovery.restingHR')} value={`${a.recovery.restingHR} bpm`} />}
+                        {a.recovery.avgHR != null && <RecStat label={t('recovery.avgHR')} value={`${a.recovery.avgHR} bpm`} />}
+                        {a.recovery.maxHR != null && <RecStat label={t('recovery.maxHR')} value={`${a.recovery.maxHR} bpm`} />}
+                        {a.recovery.hrv != null && <RecStat label={t('recovery.hrv')} value={`${a.recovery.hrv} ms`} />}
+                        {a.recovery.spo2 != null && <RecStat label={t('recovery.spo2')} value={`${a.recovery.spo2}%`} />}
+                        {a.recovery.steps != null && <RecStat label={t('recovery.stepsPerDay')} value={a.recovery.steps.toLocaleString(intlLocale(locale))} />}
                       </div>
                     </div>
                   )}
@@ -1805,14 +1822,14 @@ export default function CoachDashboard() {
                     <div className="cx-inner" style={{ border:`1px solid ${a.blood.pendingCoachValidation ? "#a89050" : "var(--line-soft)"}`, padding:"20px", marginBottom:14, ...(a.blood.pendingCoachValidation ? { boxShadow:"0 0 0 1px rgba(168,144,80,.2)" } : {}) }}>
                       <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:11 }}>
                         <div className="t-eyebrow" style={{ color: a.blood.pendingCoachValidation ? "#c8a060" : "var(--txt-3)" }}>
-                          🩸 {a.blood.pendingCoachValidation ? "Bilan à valider" : "Bilan sanguin"}
+                          🩸 {a.blood.pendingCoachValidation ? t('blood.toValidate') : t('blood.bloodTest')}
                         </div>
                         <div style={{ fontSize:"12px", color:"var(--txt-4)" }}>{a.blood.date || '—'}</div>
                       </div>
                       <div style={{ fontSize:"14px", color:"var(--gold)", marginBottom:8, lineHeight:1.6 }}>{a.blood.reportType}</div>
                       {a.blood.pendingCoachValidation ? (
                         <>
-                          <div style={{ fontSize:"11px", color:"#a89050", letterSpacing:1, textTransform:"uppercase", marginBottom:5 }}>✎ Analyse (modifiable avant validation)</div>
+                          <div style={{ fontSize:"11px", color:"#a89050", letterSpacing:1, textTransform:"uppercase", marginBottom:5 }}>{t('blood.analysisEditable')}</div>
                           <Ed block
                             value={bloodEdits[a.id]?.summary ?? a.blood.summary ?? ''}
                             onChange={v => setBloodEdits(p => ({ ...p, [a.id]: { ...p[a.id], summary: v } }))}
@@ -1823,7 +1840,7 @@ export default function CoachDashboard() {
                       ))}
                       {a.blood.abnormal?.length > 0 && (
                         <div>
-                          <div style={{ fontSize:"11px", color:"var(--txt-4)", letterSpacing:1, textTransform:"uppercase", marginBottom:7 }}>Marqueurs anormaux</div>
+                          <div style={{ fontSize:"11px", color:"var(--txt-4)", letterSpacing:1, textTransform:"uppercase", marginBottom:7 }}>{t('blood.abnormalMarkers')}</div>
                           <div style={{ display:"flex", flexWrap:"wrap", gap:6 }}>
                             {a.blood.abnormal.map((m, i) => (
                               <div key={i} style={{ background: m.status==='bad'?"#1c0f0f":"#1a1605", border:`1px solid ${m.status==='bad'?"#5a2a2a":"#5a4a1a"}`, borderRadius:7, padding:"5px 10px", fontSize:"12px", color: m.status==='bad'?"var(--red)":"var(--amber)" }}>
@@ -1834,7 +1851,7 @@ export default function CoachDashboard() {
                         </div>
                       )}
                       {(!a.blood.abnormal || a.blood.abnormal.length === 0) && (
-                        <div style={{ fontSize:"12px", color:"var(--green)" }}>✓ Tous les marqueurs sont normaux</div>
+                        <div style={{ fontSize:"12px", color:"var(--green)" }}>{t('blood.allNormal')}</div>
                       )}
                       {a.blood.pendingCoachValidation && (
                         <button
@@ -1848,25 +1865,25 @@ export default function CoachDashboard() {
                           }}
                           className="cx-btn"
                           style={{ marginTop:13, width:"100%", padding:"9px", background:"var(--gold)", border:"none", color:"#15130d", fontSize:"13px", fontWeight:700, cursor:validatingBlood===a.id?"not-allowed":"pointer", opacity:validatingBlood===a.id?0.6:1 }}>
-                          {validatingBlood === a.id ? "Envoi…" : `✓ Valider et envoyer à ${a.name.split(' ')[0]}`}
+                          {validatingBlood === a.id ? t('blood.sending') : t('blood.validateAndSendTo', { name: a.name.split(' ')[0] })}
                         </button>
                       )}
                     </div>
                   )}
 
                   {/* ── (4) Nutrition — objectifs & journal ── */}
-                  <div className="cx-group-hd"><span className="lbl">Objectifs &amp; Journal</span><span className="ln"/></div>
+                  <div className="cx-group-hd"><span className="lbl">{t('groups.goalsJournal')}</span><span className="ln"/></div>
 
                   {/* Édition objectifs */}
                   {editingId === a.id ? (
                     <div className="cx-inner" style={{ padding:"16px", marginBottom:14 }}>
-                      <div className="t-eyebrow" style={{ marginBottom:14 }}>Modifier les objectifs</div>
+                      <div className="t-eyebrow" style={{ marginBottom:14 }}>{t('goalsEdit.title')}</div>
                       <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:10, marginBottom:12 }}>
                         {[
-                          { k:'goalKcal', l:'Kcal/j' },
-                          { k:'goalProtein', l:'Protéines (g)' },
-                          { k:'goalCarbs', l:'Glucides (g)' },
-                          { k:'goalFat', l:'Lipides (g)' },
+                          { k:'goalKcal', l:t('goalsEdit.kcalDay') },
+                          { k:'goalProtein', l:t('goalsEdit.protein') },
+                          { k:'goalCarbs', l:t('goalsEdit.carbs') },
+                          { k:'goalFat', l:t('goalsEdit.fat') },
                         ].map(f => (
                           <div key={f.k}>
                             <div style={{ fontSize:"11px", color:"var(--txt-3)", letterSpacing:1, marginBottom:6 }}>{f.l}</div>
@@ -1876,32 +1893,32 @@ export default function CoachDashboard() {
                           </div>
                         ))}
                       </div>
-                      <textarea value={editNote} onChange={e => setEditNote(e.target.value)} placeholder="Note pour l'élève (optionnel)…" rows={2}
+                      <textarea value={editNote} onChange={e => setEditNote(e.target.value)} placeholder={t('goalsEdit.notePlaceholder')} rows={2}
                         className="cx-in" style={{ width:"100%", resize:"none", marginBottom:10, fontSize:"13.5px" }}/>
                       <div style={{ display:"flex", gap:8 }}>
-                        <button onClick={() => setEditingId(null)} className="cx-btn cx-btn-ghost" style={{ flex:1, padding:"9px", fontSize:"13px" }}>Annuler</button>
+                        <button onClick={() => setEditingId(null)} className="cx-btn cx-btn-ghost" style={{ flex:1, padding:"9px", fontSize:"13px" }}>{t('goalsEdit.cancel')}</button>
                         <button onClick={() => saveGoals(a.id)} disabled={savingId===a.id} className="cx-btn cx-btn-gold" style={{ flex:2, padding:"9px", fontSize:"13px", opacity:savingId===a.id?0.6:1 }}>
-                          {savingId===a.id ? "Enregistrement…" : "✓ Appliquer"}
+                          {savingId===a.id ? t('goalsEdit.saving') : t('goalsEdit.apply')}
                         </button>
                       </div>
                     </div>
                   ) : (
                     <button onClick={() => startEdit(a)} className="cx-collapse" style={{ borderRadius:"var(--r-sm)", marginBottom:10, color:"var(--blue)", justifyContent:"center", gap:6 }}>
-                      ✏️ Modifier les objectifs
+                      {t('goalsEdit.editBtn')}
                     </button>
                   )}
 
                   {/* Autonomie de l'élève : droit de générer lui-même ses programmes */}
                   <div className="cx-inner" style={{ padding:"16px 18px", marginBottom:14 }}>
-                    <div className="t-eyebrow" style={{ marginBottom:5 }}>Autonomie de l'élève</div>
-                    <div style={{ fontSize:"12px", color:"var(--txt-4)", marginBottom:12, lineHeight:1.5 }}>Par défaut, c'est toi qui gères ses programmes.</div>
+                    <div className="t-eyebrow" style={{ marginBottom:5 }}>{t('autonomy.title')}</div>
+                    <div style={{ fontSize:"12px", color:"var(--txt-4)", marginBottom:12, lineHeight:1.5 }}>{t('autonomy.desc')}</div>
                     {[
-                      { field:'selfNutritionAllowed', label:'Peut générer ses programmes nutrition' },
-                      { field:'selfMuscuAllowed', label:'Peut générer ses programmes muscu' },
-                    ].map(t => (
-                      <div key={t.field} style={{ display:"flex", justifyContent:"space-between", alignItems:"center", gap:12, padding:"7px 0" }}>
-                        <span style={{ fontSize:"13.5px", color:"var(--txt)" }}>{t.label}</span>
-                        <ToggleSwitch on={!!a[t.field]} onToggle={()=>toggleAutonomy(a.id, t.field, !a[t.field])} />
+                      { field:'selfNutritionAllowed', label:t('autonomy.nutritionLabel') },
+                      { field:'selfMuscuAllowed', label:t('autonomy.muscuLabel') },
+                    ].map(row => (
+                      <div key={row.field} style={{ display:"flex", justifyContent:"space-between", alignItems:"center", gap:12, padding:"7px 0" }}>
+                        <span style={{ fontSize:"13.5px", color:"var(--txt)" }}>{row.label}</span>
+                        <ToggleSwitch on={!!a[row.field]} onToggle={()=>toggleAutonomy(a.id, row.field, !a[row.field])} />
                       </div>
                     ))}
                   </div>
@@ -1911,8 +1928,8 @@ export default function CoachDashboard() {
                     <div style={{ marginBottom:12 }}>
                       <button onClick={() => setExpandedJournal(expandedJournal===a.id ? null : a.id)}
                         className="cx-collapse" style={{ borderRadius: expandedJournal===a.id?"var(--r-sm) var(--r-sm) 0 0":"var(--r-sm)" }}>
-                        <span>📋 Journal aujourd'hui</span>
-                        <span className="chev">{a.todayJournal.length} aliments {expandedJournal===a.id?"▲":"▼"}</span>
+                        <span>{t('journal.title')}</span>
+                        <span className="chev">{t('journal.foodsCount', { count: a.todayJournal.length, n: a.todayJournal.length })} {expandedJournal===a.id?"▲":"▼"}</span>
                       </button>
                       {expandedJournal===a.id && (
                         <div className="cx-inner" style={{ borderTop:"none", borderRadius:"0 0 var(--r-sm) var(--r-sm)", padding:"16px 18px" }}>
@@ -1922,7 +1939,7 @@ export default function CoachDashboard() {
                                 <span style={{ fontSize:"13.5px", color:"var(--gold)" }}>{e.name}</span>
                                 {e.meal && <span style={{ fontSize:"11.5px", color:"var(--txt-4)", marginLeft:8 }}>{e.meal}</span>}
                               </div>
-                              <span style={{ fontSize:"12.5px", color:"var(--txt-3)", flexShrink:0, marginLeft:8 }}>{e.kcal} kcal · {e.protein}g prot</span>
+                              <span style={{ fontSize:"12.5px", color:"var(--txt-3)", flexShrink:0, marginLeft:8 }}>{t('journal.kcalProt', { kcal: e.kcal, protein: e.protein })}</span>
                             </div>
                           ))}
                           {/* ─── Commentaire coach sur le journal ─── */}
@@ -1933,15 +1950,15 @@ export default function CoachDashboard() {
                             const inputVal = journalCommentInput[key] ?? '';
                             return (
                               <div style={{ marginTop:11, paddingTop:11, borderTop:"1px solid var(--line-soft)" }}>
-                                <div className="t-eyebrow" style={{ marginBottom:7 }}>Commentaire coach</div>
+                                <div className="t-eyebrow" style={{ marginBottom:7 }}>{t('journal.commentTitle')}</div>
                                 {existing && (
                                   <div style={{ fontSize:"13px", color:"var(--txt-2)", fontStyle:"italic", marginBottom:7, lineHeight:1.5 }}>{existing}</div>
                                 )}
                                 <div style={{ display:"flex", gap:6 }}>
-                                  <input value={inputVal} onChange={e=>setJournalCommentInput(prev=>({...prev,[key]:e.target.value}))} placeholder="Ajouter un commentaire…"
+                                  <input value={inputVal} onChange={e=>setJournalCommentInput(prev=>({...prev,[key]:e.target.value}))} placeholder={t('journal.addCommentPh')}
                                     className="cx-in" style={{ flex:1, fontSize:"13.5px" }}/>
                                   <button onClick={()=>saveJournalComment(a.id)}
-                                    className="cx-btn" style={{ padding:"7px 12px", background:"#1f1b13", border:"1px solid var(--line-gold)", color:"var(--gold)", fontSize:"12.5px", whiteSpace:"nowrap" }}>Enregistrer</button>
+                                    className="cx-btn" style={{ padding:"7px 12px", background:"#1f1b13", border:"1px solid var(--line-gold)", color:"var(--gold)", fontSize:"12.5px", whiteSpace:"nowrap" }}>{t('journal.save')}</button>
                                   {existing && (
                                     <button onClick={()=>deleteJournalComment(a.id)}
                                       className="cx-btn" style={{ padding:"7px 9px", background:"#1a0d0d", border:"1px solid #3a2020", color:"#8a4040", fontSize:"14px" }}>🗑</button>
@@ -1957,7 +1974,7 @@ export default function CoachDashboard() {
 
                   {/* ── (5) Suivi (mensurations, logs, check-ins, bilan initial) ── header masqué si aucune sous-section n'a de donnée */}
                   {(measurements[a.id]?.length > 0 || muscuLogs[a.id]?.length > 0 || checkins[a.id]?.length > 0 || (intakes[a.id] && [intakes[a.id].allergies, intakes[a.id].goals, intakes[a.id].medicalHistory, intakes[a.id].injuries, intakes[a.id].lifestyle, intakes[a.id].motivation].some(Boolean))) && (
-                    <div className="cx-group-hd"><span className="lbl">Suivi détaillé</span><span className="ln"/></div>
+                    <div className="cx-group-hd"><span className="lbl">{t('groups.detailedTracking')}</span><span className="ln"/></div>
                   )}
 
                   {/* ─── Mensurations ─── (masqué si aucune donnée chargée) */}
@@ -1968,7 +1985,7 @@ export default function CoachDashboard() {
                       setMeasurementsOpen(prev=>({...prev,[a.id]:!prev[a.id]}));
                       if (opening) loadMeasurements(a.id);
                     }} className="cx-collapse" style={{ borderRadius: measurementsOpen[a.id]?"var(--r-sm) var(--r-sm) 0 0":"var(--r-sm)" }}>
-                      <span>📏 Mensurations</span>
+                      <span>{t('measurements.title')}</span>
                       <span className="chev">{measurementsOpen[a.id]?"▲":"▼"}</span>
                     </button>
                     {measurementsOpen[a.id] && (
@@ -1977,7 +1994,7 @@ export default function CoachDashboard() {
                           <table style={{ width:"100%", borderCollapse:"collapse", fontSize:"12.5px" }}>
                             <thead>
                               <tr>
-                                {["Date","Poids","Taille","Poitrine","Hanches","Bras","Cuisse","% Graisse","Muscle"].map(h=>(
+                                {t('measurements.headers').map(h=>(
                                   <th key={h} style={{ textAlign:"left", color:"var(--txt-3)", fontWeight:"normal", letterSpacing:0.5, paddingBottom:9, paddingRight:8, textTransform:"uppercase", fontSize:"11px" }}>{h}</th>
                                 ))}
                               </tr>
@@ -1985,7 +2002,7 @@ export default function CoachDashboard() {
                             <tbody>
                               {measurements[a.id].slice(0,5).map((m,i)=>(
                                 <tr key={i} style={{ borderTop:"1px solid var(--line-soft)" }}>
-                                  <td style={{ padding:"7px 8px 7px 0", color:"var(--txt-3)" }}>{new Date(m.date).toLocaleDateString('fr-FR')}</td>
+                                  <td style={{ padding:"7px 8px 7px 0", color:"var(--txt-3)" }}>{new Date(m.date).toLocaleDateString(intlLocale(locale))}</td>
                                   <td style={{ padding:"7px 8px 7px 0", color:"var(--cream)" }}>{m.weight??'—'} kg</td>
                                   <td style={{ padding:"7px 8px 7px 0", color:"var(--txt)" }}>{m.waist??'—'}</td>
                                   <td style={{ padding:"7px 8px 7px 0", color:"var(--txt)" }}>{m.chest??'—'}</td>
@@ -2012,7 +2029,7 @@ export default function CoachDashboard() {
                       setMuscuLogsOpen(prev=>({...prev,[a.id]:!prev[a.id]}));
                       if (opening) loadMuscuLogs(a.id);
                     }} className="cx-collapse" style={{ borderRadius: muscuLogsOpen[a.id]?"var(--r-sm) var(--r-sm) 0 0":"var(--r-sm)" }}>
-                      <span>🏋️ Logs muscu</span>
+                      <span>{t('muscuLogs.title')}</span>
                       <span className="chev">{muscuLogsOpen[a.id]?"▲":"▼"}</span>
                     </button>
                     {muscuLogsOpen[a.id] && (
@@ -2021,8 +2038,8 @@ export default function CoachDashboard() {
                           muscuLogs[a.id].slice(0,8).map((sess,si)=>(
                             <div key={si} style={{ borderTop: si>0?"1px solid var(--line-soft)":"none", paddingTop: si>0?9:0, marginTop: si>0?9:0 }}>
                               <div style={{ display:"flex", justifyContent:"space-between", marginBottom:5 }}>
-                                <span style={{ fontSize:"13px", color:"var(--gold)", fontWeight:500 }}>{new Date(sess.date).toLocaleDateString('fr-FR', { weekday:'short', day:'numeric', month:'short' })}</span>
-                                <span style={{ fontSize:"12px", color:"var(--txt-3)" }}>{sess.totalSets} séries · {Math.round(sess.totalVolume)} kg vol.</span>
+                                <span style={{ fontSize:"13px", color:"var(--gold)", fontWeight:500 }}>{new Date(sess.date).toLocaleDateString(intlLocale(locale), { weekday:'short', day:'numeric', month:'short' })}</span>
+                                <span style={{ fontSize:"12px", color:"var(--txt-3)" }}>{t('muscuLogs.setsVol', { sets: sess.totalSets, vol: Math.round(sess.totalVolume) })}</span>
                               </div>
                               {sess.exercises.map((ex,ei)=>(
                                 <div key={ei} style={{ fontSize:"12px", color:"var(--txt-3)", lineHeight:1.7 }}>
@@ -2045,7 +2062,7 @@ export default function CoachDashboard() {
                       setCheckinsOpen(prev=>({...prev,[a.id]:!prev[a.id]}));
                       if (opening) loadCheckins(a.id);
                     }} className="cx-collapse" style={{ borderRadius: checkinsOpen[a.id]?"var(--r-sm) var(--r-sm) 0 0":"var(--r-sm)" }}>
-                      <span>✅ Check-ins</span>
+                      <span>{t('checkins.title')}</span>
                       <span className="chev">{checkinsOpen[a.id]?"▲":"▼"}</span>
                     </button>
                     {checkinsOpen[a.id] && (
@@ -2053,11 +2070,11 @@ export default function CoachDashboard() {
                         {checkins[a.id].slice(0,4).map((c,i)=>(
                           <div key={i} style={{ padding:"9px 0", borderBottom: i<Math.min(checkins[a.id].length,4)-1?"1px solid var(--line-soft)":"none" }}>
                             <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:6 }}>
-                              <div style={{ fontSize:"12.5px", color:"var(--txt-2)" }}>{new Date(c.date).toLocaleDateString('fr-FR')}</div>
+                              <div style={{ fontSize:"12.5px", color:"var(--txt-2)" }}>{new Date(c.date).toLocaleDateString(intlLocale(locale))}</div>
                               {c.weight && <div style={{ fontSize:"12.5px", color:"var(--gold)" }}>{c.weight} kg</div>}
                             </div>
                             <div style={{ display:"flex", gap:16 }}>
-                              {[{l:"Humeur",v:c.mood},{l:"Énergie",v:c.energy}].map(({l,v})=>(
+                              {[{l:t('checkins.mood'),v:c.mood},{l:t('checkins.energy'),v:c.energy}].map(({l,v})=>(
                                 <div key={l}>
                                   <div style={{ fontSize:"11px", color:"var(--txt-4)", marginBottom:3, textTransform:"uppercase", letterSpacing:.5 }}>{l}</div>
                                   <div style={{ display:"flex", gap:3 }}>
@@ -2069,7 +2086,7 @@ export default function CoachDashboard() {
                               ))}
                               {c.sleep!=null && (
                                 <div>
-                                  <div style={{ fontSize:"11px", color:"var(--txt-4)", marginBottom:3, textTransform:"uppercase", letterSpacing:.5 }}>Sommeil</div>
+                                  <div style={{ fontSize:"11px", color:"var(--txt-4)", marginBottom:3, textTransform:"uppercase", letterSpacing:.5 }}>{t('checkins.sleep')}</div>
                                   <div style={{ fontSize:"12.5px", color:"var(--blue)" }}>{c.sleep}h</div>
                                 </div>
                               )}
@@ -2082,9 +2099,9 @@ export default function CoachDashboard() {
                               if (entries.length === 0) return null;
                               const qOf = id => (checkinQuestions || []).find(q => q.id === id);
                               const fmt = (id, v) => {
-                                const t = qOf(id)?.type;
-                                if (t === 'bool' || typeof v === 'boolean') return (v === true || v === 'true' || v === 1) ? 'Oui' : 'Non';
-                                if (t === 'scale') return `${v}/5`;
+                                const qType = qOf(id)?.type;
+                                if (qType === 'bool' || typeof v === 'boolean') return (v === true || v === 'true' || v === 1) ? t('checkins.yes') : t('checkins.no');
+                                if (qType === 'scale') return `${v}/5`;
                                 return String(v);
                               };
                               return (
@@ -2113,7 +2130,7 @@ export default function CoachDashboard() {
                       setCoachMediaOpen(prev=>({...prev,[a.id]:!prev[a.id]}));
                       if (opening) loadMedia(a.id);
                     }} className="cx-collapse" style={{ borderRadius: coachMediaOpen[a.id]?"var(--r-sm) var(--r-sm) 0 0":"var(--r-sm)" }}>
-                      <span>📸 Suivi photo / vidéo{(() => { const n = (coachMedia[a.id]||[]).filter(m=>!m.viewedAt && !m.expired).length; return n>0 ? <span className="cx-badge red" style={{ minWidth:18, height:18, padding:"0 5px", marginLeft:8 }}>{n}</span> : null; })()}</span>
+                      <span>{t('media.titlePrefix')}{(() => { const n = (coachMedia[a.id]||[]).filter(m=>!m.viewedAt && !m.expired).length; return n>0 ? <span className="cx-badge red" style={{ minWidth:18, height:18, padding:"0 5px", marginLeft:8 }}>{n}</span> : null; })()}</span>
                       <span className="chev">{coachMediaOpen[a.id]?"▲":"▼"}</span>
                     </button>
                     {coachMediaOpen[a.id] && (() => {
@@ -2124,55 +2141,55 @@ export default function CoachDashboard() {
                       <div className="cx-inner" style={{ borderTop:"none", borderRadius:"0 0 var(--r-sm) var(--r-sm)", padding:"16px 18px" }}>
                         {/* Barre d'outils : filtre · avant/après · tout télécharger */}
                         <div style={{ display:"flex", flexWrap:"wrap", gap:8, alignItems:"center", marginBottom:14 }}>
-                          {[['all','Tout'],['photo','Photos'],['video','Vidéos']].map(([k,l])=>(
+                          {[['all',t('media.all')],['photo',t('media.photos')],['video',t('media.videos')]].map(([k,l])=>(
                             <button key={k} onClick={()=>setMediaFilter(k)} className={`cx-chip${mediaFilter===k?' sel':''}`} style={{ padding:"5px 12px", fontSize:"12px" }}>{l}</button>
                           ))}
                           <div style={{ flex:1 }}/>
-                          <button onClick={()=>{ setCompareMode(c=>!c); setCompareSel([]); }} className="cx-icon-btn" style={{ padding:"5px 12px", fontSize:"12px", ...(compareMode?{ color:"var(--gold)", borderColor:"var(--line-gold)" }:{}) }}>{compareMode?'Annuler':'⇄ Avant/après'}</button>
-                          <button onClick={async()=>{ for (const m of items) { if (m.type==='photo' && m.url) { await downloadMedia(m.url,m.type,m.id); await new Promise(r=>setTimeout(r,400)); } } }} className="cx-icon-btn" style={{ padding:"5px 12px", fontSize:"12px" }}>⬇ Tout</button>
+                          <button onClick={()=>{ setCompareMode(c=>!c); setCompareSel([]); }} className="cx-icon-btn" style={{ padding:"5px 12px", fontSize:"12px", ...(compareMode?{ color:"var(--gold)", borderColor:"var(--line-gold)" }:{}) }}>{compareMode?t('media.cancel'):t('media.compare')}</button>
+                          <button onClick={async()=>{ for (const m of items) { if (m.type==='photo' && m.url) { await downloadMedia(m.url,m.type,m.id); await new Promise(r=>setTimeout(r,400)); } } }} className="cx-icon-btn" style={{ padding:"5px 12px", fontSize:"12px" }}>{t('media.downloadAll')}</button>
                         </div>
                         {compareMode && (
                           <div style={{ fontSize:"12px", color:"var(--txt-3)", marginBottom:12 }}>
-                            Clique 2 photos à comparer ({selObjs.length}/2)
-                            {selObjs.length===2 && <button onClick={()=>setCompareView(selObjs)} className="cx-icon-btn cx-btn-gold" style={{ padding:"4px 12px", marginLeft:8, fontSize:"12px" }}>Comparer ▸</button>}
+                            {t('media.comparePrompt', { n: selObjs.length })}
+                            {selObjs.length===2 && <button onClick={()=>setCompareView(selObjs)} className="cx-icon-btn cx-btn-gold" style={{ padding:"4px 12px", marginLeft:8, fontSize:"12px" }}>{t('media.compareBtn')}</button>}
                           </div>
                         )}
                         {items.map((m,i)=>(
                           <div key={m.id} style={{ padding:"12px 0", borderBottom: i<items.length-1?"1px solid var(--line-soft)":"none", ...(compareMode && compareSel.includes(m.id)?{ outline:"2px solid var(--gold)", outlineOffset:"3px", borderRadius:"6px" }:{}) }}>
                             <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", gap:8, marginBottom:8 }}>
                               <div style={{ fontSize:"12px", color:"var(--txt-3)", display:"flex", alignItems:"center", gap:8, flexWrap:"wrap" }}>
-                                <span>{m.type==='video'?'🎥 Vidéo':'📸 Photo'} · {new Date(m.date).toLocaleDateString('fr-FR')}{m.viewedAt?' · vu':''}</span>
+                                <span>{m.type==='video'?t('media.video'):t('media.photo')} · {new Date(m.date).toLocaleDateString(intlLocale(locale))}{m.viewedAt?` ${t('media.seen')}`:''}</span>
                                 {m.weight ? <span style={{ color:"var(--gold)" }}>{m.weight} kg</span> : null}
-                                {m.isReference && <span style={{ color:"var(--gold)", border:"1px solid var(--line-gold)", borderRadius:4, padding:"0 5px" }}>★ référence</span>}
+                                {m.isReference && <span style={{ color:"var(--gold)", border:"1px solid var(--line-gold)", borderRadius:4, padding:"0 5px" }}>{t('media.reference')}</span>}
                               </div>
                               <div style={{ display:"flex", gap:6 }}>
-                                {!m.expired && <button onClick={()=>toggleReference(a.id,m.id)} title="Marquer comme référence (point de départ avant/après)" className="cx-icon-btn" style={{ padding:"4px 9px", fontSize:"12px", ...(m.isReference?{ color:"var(--gold)", borderColor:"var(--line-gold)" }:{}) }}>★</button>}
-                                {!m.expired && m.url && <button onClick={()=>downloadMedia(m.url, m.type, m.id)} title="Télécharger" className="cx-icon-btn" style={{ padding:"4px 9px", fontSize:"12px" }}>⬇</button>}
+                                {!m.expired && <button onClick={()=>toggleReference(a.id,m.id)} title={t('media.markReference')} className="cx-icon-btn" style={{ padding:"4px 9px", fontSize:"12px", ...(m.isReference?{ color:"var(--gold)", borderColor:"var(--line-gold)" }:{}) }}>★</button>}
+                                {!m.expired && m.url && <button onClick={()=>downloadMedia(m.url, m.type, m.id)} title={t('media.download')} className="cx-icon-btn" style={{ padding:"4px 9px", fontSize:"12px" }}>⬇</button>}
                               </div>
                             </div>
                             {m.note && <div style={{ fontSize:"12px", color:"var(--txt-2)", fontStyle:"italic", marginBottom:8 }}>{m.note}</div>}
                             {m.expired ? (
-                              <div style={{ fontSize:"12px", color:"var(--txt-4)", padding:"8px 0" }}>Vidéo expirée (supprimée 48h après visionnage).</div>
+                              <div style={{ fontSize:"12px", color:"var(--txt-4)", padding:"8px 0" }}>{t('media.expiredVideo')}</div>
                             ) : m.url ? (
                               (compareMode && m.type==='photo')
                                 ? <img src={m.url} alt="" onClick={()=>setCompareSel(prev=> prev.includes(m.id) ? prev.filter(x=>x!==m.id) : (prev.length<2 ? [...prev,m.id] : [prev[1],m.id]))} style={{ width:"100%", maxHeight:340, objectFit:"contain", borderRadius:8, background:"#000", cursor:"pointer" }}/>
                                 : m.type==='video'
                                 ? <div>
                                     <video src={m.url} controls preload="metadata" onPlay={()=>!m.viewedAt && markMediaViewed(a.id,m.id)} style={{ width:"100%", maxHeight:340, borderRadius:8, background:"#000", display:"block" }}/>
-                                    <a href={m.url} target="_blank" rel="noopener noreferrer" onClick={()=>!m.viewedAt && markMediaViewed(a.id,m.id)} style={{ display:"inline-block", marginTop:6, fontSize:12, color:"var(--gold)" }}>⬇ Ouvrir / télécharger la vidéo (format iPhone HEVC)</a>
+                                    <a href={m.url} target="_blank" rel="noopener noreferrer" onClick={()=>!m.viewedAt && markMediaViewed(a.id,m.id)} style={{ display:"inline-block", marginTop:6, fontSize:12, color:"var(--gold)" }}>{t('media.openDownloadVideo')}</a>
                                   </div>
                                 : <img src={m.url} alt="" onLoad={()=>!m.viewedAt && markMediaViewed(a.id,m.id)} style={{ width:"100%", maxHeight:340, objectFit:"contain", borderRadius:8, background:"#000" }}/>
                             ) : (
-                              <div style={{ fontSize:"12px", color:"var(--txt-4)" }}>Indisponible.</div>
+                              <div style={{ fontSize:"12px", color:"var(--txt-4)" }}>{t('media.unavailable')}</div>
                             )}
-                            {m.comment && <div style={{ fontSize:"12px", color:"var(--gold)", marginTop:8 }}>Ton commentaire : {m.comment}</div>}
+                            {m.comment && <div style={{ fontSize:"12px", color:"var(--gold)", marginTop:8 }}>{t('media.yourComment', { text: m.comment })}</div>}
                             <div style={{ display:"flex", gap:8, marginTop:8 }}>
-                              <input value={mediaComment[m.id]||''} onChange={e=>setMediaComment(prev=>({...prev,[m.id]:e.target.value}))} placeholder="Commenter (form-check, conseils…)" className="cx-in" style={{ flex:1 }}/>
-                              <button onClick={()=>sendMediaComment(a.id,m.id)} className="cx-icon-btn" style={{ padding:"8px 14px" }}>Envoyer</button>
+                              <input value={mediaComment[m.id]||''} onChange={e=>setMediaComment(prev=>({...prev,[m.id]:e.target.value}))} placeholder={t('media.commentPh')} className="cx-in" style={{ flex:1 }}/>
+                              <button onClick={()=>sendMediaComment(a.id,m.id)} className="cx-icon-btn" style={{ padding:"8px 14px" }}>{t('media.send')}</button>
                             </div>
                           </div>
                         ))}
-                        {items.length===0 && <div style={{ fontSize:"12px", color:"var(--txt-4)", padding:"8px 0" }}>Aucun média pour ce filtre.</div>}
+                        {items.length===0 && <div style={{ fontSize:"12px", color:"var(--txt-4)", padding:"8px 0" }}>{t('media.noMediaForFilter')}</div>}
                       </div>
                       );
                     })()}
@@ -2184,17 +2201,17 @@ export default function CoachDashboard() {
                     const intake = intakes[a.id];
                     if (!intake) return null;
                     const fields = [
-                      { l:"Allergies", v:intake.allergies },
-                      { l:"Objectifs", v:intake.goals },
-                      { l:"Antécédents médicaux", v:intake.medicalHistory },
-                      { l:"Blessures", v:intake.injuries },
-                      { l:"Mode de vie", v:intake.lifestyle },
-                      { l:"Motivation", v:intake.motivation },
+                      { l:t('intake.allergies'), v:intake.allergies },
+                      { l:t('intake.goals'), v:intake.goals },
+                      { l:t('intake.medicalHistory'), v:intake.medicalHistory },
+                      { l:t('intake.injuries'), v:intake.injuries },
+                      { l:t('intake.lifestyle'), v:intake.lifestyle },
+                      { l:t('intake.motivation'), v:intake.motivation },
                     ].filter(f=>f.v);
                     if (fields.length === 0) return null;
                     return (
                       <div className="cx-inner" style={{ padding:"18px 20px", marginBottom:10 }}>
-                        <div className="t-eyebrow" style={{ marginBottom:9 }}>📋 Bilan initial</div>
+                        <div className="t-eyebrow" style={{ marginBottom:9 }}>{t('intake.title')}</div>
                         <div style={{ display:"flex", flexDirection:"column", gap:6 }}>
                           {fields.map(f=>(
                             <div key={f.l}>
@@ -2208,36 +2225,36 @@ export default function CoachDashboard() {
                   })()}
 
                   {/* ── (6) Coaching & Actions ── */}
-                  <div className="cx-group-hd"><span className="lbl">Coaching &amp; Actions</span><span className="ln"/></div>
+                  <div className="cx-group-hd"><span className="lbl">{t('groups.coachingActions')}</span><span className="ln"/></div>
 
                   {/* Programme actuel (nutrition + muscu) — carte masquée si aucun programme */}
                   {(() => {
                     const cur = currentPrograms[a.id];
                     if (!cur) return null; // en chargement (undefined) ou null → rien
                     const rows = [
-                      { type:'nutrition', label:'Nutrition', accent:'var(--green)', prog: cur.nutrition },
-                      { type:'muscu', label:'Muscu', accent:'var(--violet)', prog: cur.muscu },
+                      { type:'nutrition', label:t('currentProgram.nutrition'), accent:'var(--green)', prog: cur.nutrition },
+                      { type:'muscu', label:t('currentProgram.muscu'), accent:'var(--violet)', prog: cur.muscu },
                     ].filter(r => r.prog);
                     if (rows.length === 0) return null;
                     return (
                       <div className="cx-inner" style={{ padding:"18px 20px", marginBottom:14 }}>
-                        <div className="t-eyebrow" style={{ marginBottom:14 }}>Programme actuel</div>
+                        <div className="t-eyebrow" style={{ marginBottom:14 }}>{t('currentProgram.title')}</div>
                         <div style={{ display:"flex", flexDirection:"column", gap:12 }}>
                           {rows.map(r => (
                             <div key={r.type} style={{ display:"flex", alignItems:"center", gap:12 }}>
                               <div style={{ flex:1, minWidth:0 }}>
                                 <div style={{ fontSize:"13.5px", color:"var(--cream)", fontWeight:500 }}>{r.label}</div>
                                 <div style={{ fontSize:"11.5px", color:"var(--txt-3)", marginTop:3 }}>
-                                  {(r.prog.days?.length||0)} jour{(r.prog.days?.length||0)>1?'s':''}
+                                  {t('currentProgram.daysCount', { count: r.prog.days?.length||0, n: r.prog.days?.length||0 })}
                                   <span style={{ color:"var(--line-gold)" }}> · </span>
                                   {(r.prog.status==='sent'||r.prog.sentAt)
-                                    ? <span style={{ color:"var(--green)" }}>Envoyé{r.prog.sentAt?` le ${new Date(r.prog.sentAt).toLocaleDateString('fr-FR')}`:''}</span>
-                                    : <span style={{ color:"var(--amber)" }}>Brouillon</span>}
+                                    ? <span style={{ color:"var(--green)" }}>{r.prog.sentAt ? t('currentProgram.sentOn', { date: new Date(r.prog.sentAt).toLocaleDateString(intlLocale(locale)) }) : t('currentProgram.sent')}</span>
+                                    : <span style={{ color:"var(--amber)" }}>{t('currentProgram.draft')}</span>}
                                 </div>
                               </div>
                               <button onClick={()=>editCurrentProgram(r.type)}
                                 className="cx-btn" style={{ padding:"7px 14px", background:"transparent", border:"1px solid var(--line-gold)", color:r.accent, fontSize:"12px", whiteSpace:"nowrap" }}>
-                                Modifier / renvoyer
+                                {t('currentProgram.editResend')}
                               </button>
                             </div>
                           ))}
@@ -2250,26 +2267,26 @@ export default function CoachDashboard() {
                   <div className="cx-actions" style={{ display:"flex", gap:10, marginBottom:10 }}>
                     <button onClick={()=>generateReport(a.id, a.name)} disabled={reportLoading}
                       className="cx-tile" style={{ flex:2, position:"relative", padding:"14px 8px", color:"var(--gold)", fontSize:"13px", ...(a.reportRequest ? { borderColor:"var(--gold)" } : {}), opacity:reportLoading?0.5:1 }}>
-                      {reportLoading && reportAthlete===a.name ? "…" : `Rapport ${reportDays}j`}
+                      {reportLoading && reportAthlete===a.name ? "…" : t('actions.reportBtn', { n: reportDays })}
                       {a.reportRequest && <span className="cx-badge gold" style={{ position:"absolute", top:-6, right:-6, width:16, height:16, zIndex:1 }}>!</span>}
                     </button>
                     <button onClick={() => openProgramModal(a)}
                       className="cx-tile" style={{ flex:1, padding:"14px 6px", color:"var(--green)", fontSize:"13px" }}>
-                      Nutrition
+                      {t('actions.nutritionBtn')}
                     </button>
                     <button onClick={() => openMuscuModal(a)}
                       className="cx-tile" style={{ flex:1, padding:"14px 6px", color:"var(--violet)", fontSize:"13px" }}>
-                      Muscu
+                      {t('actions.muscuBtn')}
                     </button>
                   </div>
                   <div className="cx-actions" style={{ display:"flex", gap:10, marginBottom:18 }}>
                     <button onClick={() => openChat(a)} className="cx-tile" style={{ flex:1, position:"relative", padding:"12px 6px", color:"var(--blue)", fontSize:"12.5px" }}>
-                      Message
+                      {t('actions.messageBtn')}
                       {chatUnread[a.id] > 0 && <span className="cx-badge red" style={{ position:"absolute", top:-6, right:-6, width:16, height:16, zIndex:1 }}>{chatUnread[a.id]}</span>}
                     </button>
                     <button onClick={async () => { await fetch('/api/auth/view-as', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({ athleteId: a.id }) }); window.location.href = '/'; }}
                       className="cx-tile" style={{ flex:1, position:"relative", padding:"12px 6px", color: a.pendingBlood ? "var(--green)" : "var(--txt-2)", fontSize:"12.5px", ...(a.pendingBlood ? { borderColor:"#3a7a3a" } : {}) }}>
-                      Voir son app
+                      {t('actions.viewApp')}
                       {a.pendingBlood && <span className="cx-badge" style={{ position:"absolute", top:-6, right:-6, width:16, height:16, background:"var(--green)", color:"#15130d", zIndex:1 }}>!</span>}
                     </button>
                   </div>
@@ -2280,17 +2297,17 @@ export default function CoachDashboard() {
                       if (notesOpen===a.id) { setNotesOpen(null); return; }
                       if (!notesText[a.id]) {
                         const d = await fetch(`/api/coach/notes?athleteId=${a.id}`).then(r=>r.json());
-                        setNotesText(t=>({...t,[a.id]:d.notes||''}));
+                        setNotesText(prev=>({...prev,[a.id]:d.notes||''}));
                       }
                       setNotesOpen(a.id);
                     }} className="cx-collapse" style={{ borderRadius: notesOpen===a.id?"var(--r-sm) var(--r-sm) 0 0":"var(--r-sm)" }}>
-                      <span>📝 Notes privées</span>
+                      <span>{t('notes.title')}</span>
                       <span className="chev">{notesOpen===a.id?"▲":"▼"}</span>
                     </button>
                     {notesOpen===a.id && (
                       <div className="cx-inner" style={{ borderTop:"none", borderRadius:"0 0 var(--r-sm) var(--r-sm)", padding:"16px 18px" }}>
-                        <textarea value={notesText[a.id]||''} onChange={e=>setNotesText(t=>({...t,[a.id]:e.target.value}))}
-                          placeholder="Notes personnelles sur cet élève — non visibles par l'élève…"
+                        <textarea value={notesText[a.id]||''} onChange={e=>setNotesText(prev=>({...prev,[a.id]:e.target.value}))}
+                          placeholder={t('notes.placeholder')}
                           style={{ width:"100%", background:"transparent", border:"none", outline:"none", color:"var(--txt-2)", fontSize:"14px", resize:"none", minHeight:90, lineHeight:1.7 }}/>
                         <div style={{ display:"flex", justifyContent:"flex-end", marginTop:6 }}>
                           <button onClick={async()=>{
@@ -2299,7 +2316,7 @@ export default function CoachDashboard() {
                             setNotesSaving(null);
                           }} disabled={notesSaving===a.id}
                             className="cx-btn" style={{ background:"#1f1b13", border:"1px solid var(--line-gold)", padding:"6px 16px", color:"var(--gold)", fontSize:"13px" }}>
-                            {notesSaving===a.id ? '…' : 'Sauvegarder'}
+                            {notesSaving===a.id ? '…' : t('notes.save')}
                           </button>
                         </div>
                       </div>
@@ -2308,7 +2325,7 @@ export default function CoachDashboard() {
 
                   <button onClick={() => setConfirmDelete(a)}
                     className="cx-btn" style={{ width:"100%", padding:"11px", background:"transparent", border:"1px solid #3a2020", color:"var(--red)", fontSize:"12.5px" }}>
-                    Retirer cet élève
+                    {t('removeStudent.btn')}
                   </button>
                 </div>
             </div>
@@ -2324,11 +2341,11 @@ export default function CoachDashboard() {
           {/* Gauche : liste de toutes les conversations */}
           <div className="cx-msg-list">
             <div style={{ padding:"18px 18px 14px", borderBottom:"1px solid var(--line-soft)", flexShrink:0 }}>
-              <div className="t-eyebrow gold">💬 Conversations · {athletes.length}</div>
+              <div className="t-eyebrow gold">{t('messagesView.conversations', { n: athletes.length })}</div>
             </div>
             <div className="cx-msg-list-scroll cx-scroll">
               {athletes.length === 0 ? (
-                <div style={{ color:"var(--txt-4)", fontSize:"13px", padding:"24px 18px", lineHeight:1.8 }}>Aucun élève lié.<br/>Partage ton code.</div>
+                <div style={{ color:"var(--txt-4)", fontSize:"13px", padding:"24px 18px", lineHeight:1.8 }}>{t('messagesView.noStudents')}<br/>{t('messagesView.shareCode')}</div>
               ) : (() => {
                 // Tri : non-lus d'abord, puis activité récente (activeDays7j décroissant), puis A-Z.
                 const list = athletes.slice().sort((a, b) => {
@@ -2349,7 +2366,7 @@ export default function CoachDashboard() {
                       <div style={{ flex:1, minWidth:0 }}>
                         <div style={{ fontSize:"14.5px", color: active?"var(--cream)":"var(--txt)", overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{a.name}</div>
                         <div style={{ fontSize:"12px", color: unread>0?"var(--cream)":"var(--txt-3)", marginTop:3, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap", fontWeight: unread>0?500:400 }}>
-                          {preview ? preview : "Voir la conversation"}
+                          {preview ? preview : t('messagesView.viewConversation')}
                         </div>
                       </div>
                       {unread > 0 && <span className="cx-badge red" style={{ minWidth:18, height:18, padding:"0 5px" }}>{unread}</span>}
@@ -2365,8 +2382,8 @@ export default function CoachDashboard() {
             {!chatModal ? (
               <div className="cx-conv-empty">
                 <div style={{ fontSize:"36px" }}>💬</div>
-                <div style={{ fontFamily:"var(--serif)", fontSize:"20px", color:"var(--gold-dim)" }}>Sélectionne une conversation</div>
-                <div>Choisis un athlète à gauche pour échanger.</div>
+                <div style={{ fontFamily:"var(--serif)", fontSize:"20px", color:"var(--gold-dim)" }}>{t('messagesView.selectConversation')}</div>
+                <div>{t('messagesView.selectConversationDesc')}</div>
               </div>
             ) : (
               <>
@@ -2377,22 +2394,22 @@ export default function CoachDashboard() {
                   </div>
                 </div>
                 <div className="cx-scroll" style={{ flex:1, overflowY:"auto", padding:"20px 22px", display:"flex", flexDirection:"column", gap:10 }}>
-                  {chatMessages.length === 0 && <div style={{ textAlign:"center", color:"var(--txt-3)", fontSize:"13px", padding:"24px 0" }}>Aucun message avec cet élève.</div>}
+                  {chatMessages.length === 0 && <div style={{ textAlign:"center", color:"var(--txt-3)", fontSize:"13px", padding:"24px 0" }}>{t('messagesView.noMessages')}</div>}
                   {chatMessages.map((m, i) => (
                     <div key={m.id||i} style={{ display:"flex", flexDirection:"column", alignItems: m.role==='coach'?"flex-end":"flex-start" }}>
                       <div style={{ maxWidth:"78%", background:"var(--sunk)", border:`1px solid ${m.role==='coach'?"var(--line-gold)":"var(--line)"}`, borderRadius: m.role==='coach'?"14px 14px 4px 14px":"14px 14px 14px 4px", padding:"10px 14px" }}>
                         {m.imageUrl && <img src={m.imageUrl} alt="" style={{ maxWidth:220, maxHeight:220, borderRadius:8, display:"block", marginBottom: m.text?6:0, background:"#000", cursor:"pointer" }} onClick={()=>window.open(m.imageUrl,'_blank')}/>}
                         {m.text && <div style={{ fontSize:"14px", color: m.role==='coach'?"var(--cream)":"var(--txt)", lineHeight:1.5 }}>{m.text}</div>}
                       </div>
-                      <div style={{ fontSize:"11px", color:"var(--txt-3)", marginTop:4, marginLeft:4, marginRight:4 }}>{new Date(m.date).toLocaleTimeString('fr-FR',{hour:'2-digit',minute:'2-digit'})}</div>
+                      <div style={{ fontSize:"11px", color:"var(--txt-3)", marginTop:4, marginLeft:4, marginRight:4 }}>{new Date(m.date).toLocaleTimeString(intlLocale(locale),{hour:'2-digit',minute:'2-digit'})}</div>
                     </div>
                   ))}
                 </div>
                 <div style={{ display:"flex", gap:10, padding:"16px 22px", flexShrink:0, borderTop:"1px solid var(--line)" }}>
-                  <label className="cx-btn" style={{ padding:"0 14px", display:"flex", alignItems:"center", cursor:"pointer", background:"#1f1b13", border:"1px solid var(--line-gold)", color:"var(--gold)", borderRadius:"var(--r-sm)" }} title="Envoyer une photo">📷
+                  <label className="cx-btn" style={{ padding:"0 14px", display:"flex", alignItems:"center", cursor:"pointer", background:"#1f1b13", border:"1px solid var(--line-gold)", color:"var(--gold)", borderRadius:"var(--r-sm)" }} title={t('messagesView.photoTitle')}>📷
                     <input type="file" accept="image/*" style={{ display:"none" }} onChange={e=>{ const f=e.target.files?.[0]; if(f) sendChatPhoto(f); e.target.value=''; }}/>
                   </label>
-                  <input value={chatInput} onChange={e=>setChatInput(e.target.value)} onKeyDown={e=>e.key==='Enter'&&!e.shiftKey&&sendChatMessage()} placeholder={`Message à ${chatModal.name}…`} className="cx-in" style={{ flex:1 }}/>
+                  <input value={chatInput} onChange={e=>setChatInput(e.target.value)} onKeyDown={e=>e.key==='Enter'&&!e.shiftKey&&sendChatMessage()} placeholder={t('messagesView.messagePlaceholder', { name: chatModal.name })} className="cx-in" style={{ flex:1 }}/>
                   <button onClick={sendChatMessage} disabled={!chatInput.trim()||chatSending} className="cx-btn cx-btn-gold" style={{ padding:"0 18px", fontSize:"16px", opacity:!chatInput.trim()||chatSending?0.5:1 }}>→</button>
                 </div>
               </>
@@ -2408,26 +2425,26 @@ export default function CoachDashboard() {
           <div className="cx-modal cx-scroll" style={{ padding:"26px 24px", maxWidth:460, width:"100%", maxHeight:"88vh", overflowY:"auto" }} onClick={e=>e.stopPropagation()}>
             <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start", marginBottom:18 }}>
               <div>
-                <div style={{ fontFamily:"var(--serif)", fontSize:"22px", fontWeight:600, color:"var(--cream)" }}>📢 Message groupé</div>
-                <div style={{ fontSize:"12.5px", color:"var(--txt-3)", marginTop:4 }}>Envoyé dans la messagerie de chaque élève sélectionné</div>
+                <div style={{ fontFamily:"var(--serif)", fontSize:"22px", fontWeight:600, color:"var(--cream)" }}>{t('broadcast.title')}</div>
+                <div style={{ fontSize:"12.5px", color:"var(--txt-3)", marginTop:4 }}>{t('broadcast.subtitle')}</div>
               </div>
               {!broadcastSending && <button onClick={()=>setBroadcastOpen(false)} style={{ background:"transparent", border:"none", fontSize:"20px", cursor:"pointer", color:"var(--txt-2)", padding:0 }}>✕</button>}
             </div>
             <textarea value={broadcastText} maxLength={2000} rows={5}
               onChange={e=>setBroadcastText(e.target.value)}
-              placeholder="Ton message à tes élèves…"
+              placeholder={t('broadcast.placeholder')}
               className="cx-in" style={{ width:"100%", resize:"vertical", fontSize:"13.5px", lineHeight:1.5, marginBottom:4 }}/>
             <div style={{ fontSize:"11px", color:"var(--txt-4)", textAlign:"right", marginBottom:14 }}>{broadcastText.length}/2000</div>
-            <AthletePicker athletes={athletes} all={broadcastAll} onAllChange={v=>{ setBroadcastAll(v); if (v) setBroadcastIds([]); }} selected={broadcastIds} onChange={setBroadcastIds}/>
+            <AthletePicker athletes={athletes} all={broadcastAll} onAllChange={v=>{ setBroadcastAll(v); if (v) setBroadcastIds([]); }} selected={broadcastIds} onChange={setBroadcastIds} t={t}/>
             {broadcastResult && (
               <div style={{ fontSize:"12.5px", color: broadcastResult.ok?"var(--green)":"var(--amber)", marginTop:14, lineHeight:1.5 }}>{broadcastResult.text}</div>
             )}
             <div style={{ display:"flex", gap:10, marginTop:18 }}>
-              <button onClick={()=>{ if (!broadcastSending) setBroadcastOpen(false); }} className="cx-btn cx-btn-ghost" style={{ flex:1, padding:"11px", fontSize:"13.5px" }}>Fermer</button>
+              <button onClick={()=>{ if (!broadcastSending) setBroadcastOpen(false); }} className="cx-btn cx-btn-ghost" style={{ flex:1, padding:"11px", fontSize:"13.5px" }}>{t('broadcast.close')}</button>
               <button onClick={sendBroadcast} disabled={broadcastSending || !broadcastText.trim() || (!broadcastAll && broadcastIds.length===0)}
                 className="cx-btn cx-btn-gold"
                 style={{ flex:2, padding:"11px", fontSize:"13.5px", opacity:(broadcastSending || !broadcastText.trim() || (!broadcastAll && broadcastIds.length===0))?0.5:1 }}>
-                {broadcastSending ? "Envoi…" : broadcastAll ? "Envoyer à tous mes élèves" : `Envoyer à ${broadcastIds.length} élève${broadcastIds.length>1?'s':''}`}
+                {broadcastSending ? t('broadcast.sending') : broadcastAll ? t('broadcast.sendToAll') : t('broadcast.sendToCount', { count: broadcastIds.length, n: broadcastIds.length })}
               </button>
             </div>
           </div>
@@ -2438,11 +2455,11 @@ export default function CoachDashboard() {
       {confirmDelete && (
         <div style={{ position:"fixed", inset:0, background:"rgba(0,0,0,0.85)", zIndex:200, display:"flex", alignItems:"center", justifyContent:"center", padding:16 }}>
           <div className="cx-modal" style={{ padding:"28px 24px", maxWidth:360, width:"100%" }}>
-            <div style={{ fontFamily:"var(--serif)", fontSize:"22px", fontWeight:600, color:"var(--cream)", marginBottom:10 }}>Retirer {confirmDelete.name} ?</div>
-            <div style={{ fontSize:"13.5px", color:"var(--txt-2)", marginBottom:24, lineHeight:1.6 }}>Cet élève ne sera plus lié à ton compte. Ses données restent intactes.</div>
+            <div style={{ fontFamily:"var(--serif)", fontSize:"22px", fontWeight:600, color:"var(--cream)", marginBottom:10 }}>{t('removeStudent.confirmTitle', { name: confirmDelete.name })}</div>
+            <div style={{ fontSize:"13.5px", color:"var(--txt-2)", marginBottom:24, lineHeight:1.6 }}>{t('removeStudent.confirmDesc')}</div>
             <div style={{ display:"flex", gap:10 }}>
-              <button onClick={() => setConfirmDelete(null)} className="cx-btn cx-btn-ghost" style={{ flex:1, padding:"11px", fontSize:"13.5px" }}>Annuler</button>
-              <button onClick={() => deleteAthlete(confirmDelete.id)} className="cx-btn" style={{ flex:1, padding:"11px", background:"transparent", border:"1px solid #5a2a2a", color:"var(--red)", fontSize:"13.5px" }}>Retirer</button>
+              <button onClick={() => setConfirmDelete(null)} className="cx-btn cx-btn-ghost" style={{ flex:1, padding:"11px", fontSize:"13.5px" }}>{t('goalsEdit.cancel')}</button>
+              <button onClick={() => deleteAthlete(confirmDelete.id)} className="cx-btn" style={{ flex:1, padding:"11px", background:"transparent", border:"1px solid #5a2a2a", color:"var(--red)", fontSize:"13.5px" }}>{t('removeStudent.confirmBtn')}</button>
             </div>
           </div>
         </div>
@@ -2454,41 +2471,41 @@ export default function CoachDashboard() {
 
         {/* ── Check-in hebdomadaire personnalisé ── */}
         <div className="cx-inner" style={{ padding:"20px 22px", marginBottom:18 }}>
-          <div style={{ fontFamily:"var(--serif)", fontSize:18, fontWeight:600, color:"var(--cream)", marginBottom:6 }}>Check-in hebdomadaire</div>
-          <div style={{ fontSize:12.5, color:"var(--txt-3)", marginBottom:16, lineHeight:1.6 }}>Personnalise les questions que tes élèves remplissent chaque semaine · 12 questions max.</div>
+          <div style={{ fontFamily:"var(--serif)", fontSize:18, fontWeight:600, color:"var(--cream)", marginBottom:6 }}>{t('tools.checkinTitle')}</div>
+          <div style={{ fontSize:12.5, color:"var(--txt-3)", marginBottom:16, lineHeight:1.6 }}>{t('tools.checkinDesc')}</div>
           {checkinQuestions === null ? (
-            <div style={{ fontSize:"13px", color:"var(--txt-3)", padding:"10px 0" }}>Chargement…</div>
+            <div style={{ fontSize:"13px", color:"var(--txt-3)", padding:"10px 0" }}>{t('common.loading')}</div>
           ) : (
             <>
               {checkinQuestions.map((q, i) => (
                 <div key={i} style={{ display:"flex", gap:8, alignItems:"center", marginBottom:8 }}>
-                  <input value={q.label || ''} maxLength={120} placeholder="Intitulé de la question…"
+                  <input value={q.label || ''} maxLength={120} placeholder={t('tools.questionPh')}
                     onChange={e=>setCheckinQuestions(prev=>prev.map((x,j)=>j===i?{...x, label:e.target.value}:x))}
                     className="cx-in" style={{ flex:1, minWidth:0 }}/>
                   <select value={q.type} onChange={e=>setCheckinQuestions(prev=>prev.map((x,j)=>j===i?{...x, type:e.target.value}:x))}
                     className="cx-in" style={{ width:118, flexShrink:0, cursor:"pointer" }}>
-                    <option value="scale">Note /5</option>
-                    <option value="number">Nombre</option>
-                    <option value="text">Texte</option>
-                    <option value="bool">Oui / Non</option>
+                    <option value="scale">{t('tools.optionScale')}</option>
+                    <option value="number">{t('tools.optionNumber')}</option>
+                    <option value="text">{t('tools.optionText')}</option>
+                    <option value="bool">{t('tools.optionBool')}</option>
                   </select>
-                  <button onClick={()=>setCheckinQuestions(prev=>prev.filter((_,j)=>j!==i))} disabled={checkinQuestions.length<=1} title="Supprimer la question"
+                  <button onClick={()=>setCheckinQuestions(prev=>prev.filter((_,j)=>j!==i))} disabled={checkinQuestions.length<=1} title={t('tools.deleteQuestion')}
                     style={{ background:"none", border:"none", color:"var(--txt-4)", fontSize:"15px", cursor:checkinQuestions.length<=1?"not-allowed":"pointer", padding:"2px 4px", opacity:checkinQuestions.length<=1?0.4:1 }}>✕</button>
                 </div>
               ))}
               {checkinQuestions.length < 12 && (
                 <button onClick={()=>setCheckinQuestions(prev=>[...prev, { id:'', label:'', type:'scale' }])}
                   style={{ background:"transparent", border:"1px dashed var(--line)", borderRadius:"var(--r-sm)", color:"var(--gold)", cursor:"pointer", fontSize:"12.5px", padding:"7px 14px", marginTop:4 }}>
-                  + Ajouter une question
+                  {t('tools.addQuestion')}
                 </button>
               )}
               <div style={{ display:"flex", gap:10, alignItems:"center", flexWrap:"wrap", marginTop:16 }}>
                 <button onClick={saveCheckinTemplate} disabled={checkinSaving} className="cx-btn cx-btn-gold"
                   style={{ padding:"10px 18px", fontSize:"13px", opacity:checkinSaving?0.6:1 }}>
-                  {checkinSaving ? "…" : "Enregistrer"}
+                  {checkinSaving ? "…" : t('tools.save')}
                 </button>
                 <button onClick={restoreCheckinDefault} disabled={checkinSaving} className="cx-btn cx-btn-ghost" style={{ padding:"10px 16px", fontSize:"13px" }}>
-                  Rétablir le standard
+                  {t('tools.restoreDefault')}
                 </button>
                 {checkinMsg && <span style={{ fontSize:"12.5px", color: checkinMsg.ok?"var(--green)":"var(--amber)" }}>{checkinMsg.text}</span>}
               </div>
@@ -2499,15 +2516,15 @@ export default function CoachDashboard() {
         {/* ── Séquence de bienvenue ── */}
         <div className="cx-inner" style={{ padding:"20px 22px", marginBottom:18 }}>
           <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", gap:12, marginBottom:6 }}>
-            <div style={{ fontFamily:"var(--serif)", fontSize:18, fontWeight:600, color:"var(--cream)" }}>Séquence de bienvenue</div>
+            <div style={{ fontFamily:"var(--serif)", fontSize:18, fontWeight:600, color:"var(--cream)" }}>{t('tools.welcomeTitle')}</div>
             {automations && <ToggleSwitch on={!!automations.welcome?.enabled} onToggle={toggleWelcome} />}
           </div>
           <div style={{ fontSize:12.5, color:"var(--txt-3)", marginBottom:16, lineHeight:1.6 }}>
-            Messages envoyés automatiquement à chaque nouvel élève. J+0 = le jour de son arrivée.
-            {automations && !automations.welcome?.enabled && <span style={{ color:"var(--txt-4)" }}> · Séquence désactivée</span>}
+            {t('tools.welcomeDesc')}
+            {automations && !automations.welcome?.enabled && <span style={{ color:"var(--txt-4)" }}> {t('tools.welcomeDisabled')}</span>}
           </div>
           {automations === null ? (
-            <div style={{ fontSize:"13px", color:"var(--txt-3)", padding:"10px 0" }}>Chargement…</div>
+            <div style={{ fontSize:"13px", color:"var(--txt-3)", padding:"10px 0" }}>{t('common.loading')}</div>
           ) : (
             <>
               {(automations.welcome?.steps || []).map((s, i) => (
@@ -2520,10 +2537,10 @@ export default function CoachDashboard() {
                   </div>
                   <textarea value={s.text || ''} maxLength={2000} rows={2}
                     onChange={e=>editWelcomeStep(i, 'text', e.target.value)}
-                    placeholder="Message envoyé à l'élève…"
+                    placeholder={t('tools.dayOffsetMessagePh')}
                     className="cx-in" style={{ flex:1, minWidth:0, resize:"vertical", fontSize:"13.5px", lineHeight:1.5 }}/>
                   <button onClick={()=>setAutomations(prev=>({ ...prev, welcome:{ ...prev.welcome, steps: prev.welcome.steps.filter((_,j)=>j!==i) } }))}
-                    disabled={(automations.welcome?.steps || []).length<=1} title="Supprimer ce message"
+                    disabled={(automations.welcome?.steps || []).length<=1} title={t('tools.deleteMessage')}
                     style={{ background:"none", border:"none", color:"var(--txt-4)", fontSize:"15px", cursor:(automations.welcome?.steps||[]).length<=1?"not-allowed":"pointer", padding:"9px 4px 2px", opacity:(automations.welcome?.steps||[]).length<=1?0.4:1 }}>✕</button>
                 </div>
               ))}
@@ -2534,13 +2551,13 @@ export default function CoachDashboard() {
                   return { ...prev, welcome:{ ...prev.welcome, steps:[...steps, { dayOffset: last + 1, text:'' }] } };
                 })}
                   style={{ background:"transparent", border:"1px dashed var(--line)", borderRadius:"var(--r-sm)", color:"var(--gold)", cursor:"pointer", fontSize:"12.5px", padding:"7px 14px", marginTop:4 }}>
-                  + Ajouter un message
+                  {t('tools.addMessage')}
                 </button>
               )}
               <div style={{ display:"flex", gap:10, alignItems:"center", flexWrap:"wrap", marginTop:16 }}>
                 <button onClick={saveWelcome} disabled={welcomeSaving} className="cx-btn cx-btn-gold"
                   style={{ padding:"10px 18px", fontSize:"13px", opacity:welcomeSaving?0.6:1 }}>
-                  {welcomeSaving ? "…" : "Enregistrer la séquence"}
+                  {welcomeSaving ? "…" : t('tools.saveSequence')}
                 </button>
                 {welcomeMsg && <span style={{ fontSize:"12.5px", color: welcomeMsg.ok?"var(--green)":"var(--amber)" }}>{welcomeMsg.text}</span>}
               </div>
@@ -2550,10 +2567,10 @@ export default function CoachDashboard() {
 
         {/* ── Messages programmés ── */}
         <div className="cx-inner" style={{ padding:"20px 22px" }}>
-          <div style={{ fontFamily:"var(--serif)", fontSize:18, fontWeight:600, color:"var(--cream)", marginBottom:6 }}>Messages programmés</div>
-          <div style={{ fontSize:12.5, color:"var(--txt-3)", marginBottom:16, lineHeight:1.6 }}>Prépare un message à l'avance — il sera envoyé automatiquement à la date choisie.</div>
+          <div style={{ fontFamily:"var(--serif)", fontSize:18, fontWeight:600, color:"var(--cream)", marginBottom:6 }}>{t('tools.scheduledTitle')}</div>
+          <div style={{ fontSize:12.5, color:"var(--txt-3)", marginBottom:16, lineHeight:1.6 }}>{t('tools.scheduledDesc')}</div>
           {automations === null ? (
-            <div style={{ fontSize:"13px", color:"var(--txt-3)", padding:"10px 0" }}>Chargement…</div>
+            <div style={{ fontSize:"13px", color:"var(--txt-3)", padding:"10px 0" }}>{t('common.loading')}</div>
           ) : (
             <>
               {(automations.scheduled || []).length > 0 && (
@@ -2563,14 +2580,14 @@ export default function CoachDashboard() {
                       <div style={{ flex:1, minWidth:0 }}>
                         <div style={{ fontSize:"13.5px", color:"var(--txt)", lineHeight:1.5 }}>{s.text}</div>
                         <div style={{ fontSize:"11.5px", marginTop:4, color:"var(--txt-3)" }}>
-                          {s.athleteIds ? `${s.athleteIds.length} élève${s.athleteIds.length>1?'s':''}` : 'Tous les élèves'}
+                          {s.athleteIds ? t('tools.studentsCount', { count: s.athleteIds.length, n: s.athleteIds.length }) : t('tools.allStudents')}
                           <span style={{ color:"var(--line-gold)" }}> · </span>
                           {s.sentAt
-                            ? <span style={{ color:"var(--green)" }}>✓ Envoyé le {new Date(s.sentAt).toLocaleDateString('fr-FR')}</span>
-                            : <span style={{ color:"var(--amber)" }}>Programmé pour le {new Date(s.sendOn).toLocaleDateString('fr-FR')}</span>}
+                            ? <span style={{ color:"var(--green)" }}>{t('tools.sentOn', { date: new Date(s.sentAt).toLocaleDateString(intlLocale(locale)) })}</span>
+                            : <span style={{ color:"var(--amber)" }}>{t('tools.scheduledFor', { date: new Date(s.sendOn).toLocaleDateString(intlLocale(locale)) })}</span>}
                         </div>
                       </div>
-                      <button onClick={()=>deleteScheduled(s.id)} title="Supprimer"
+                      <button onClick={()=>deleteScheduled(s.id)} title={t('tools.deleteScheduled')}
                         style={{ background:"none", border:"none", color:"var(--txt-4)", fontSize:"15px", cursor:"pointer", padding:"2px 4px" }}>✕</button>
                     </div>
                   ))}
@@ -2578,19 +2595,19 @@ export default function CoachDashboard() {
               )}
               <textarea value={schedText} maxLength={2000} rows={3}
                 onChange={e=>setSchedText(e.target.value)}
-                placeholder="Ex : Pense à faire ton check-in ce dimanche !"
+                placeholder={t('tools.messagePh')}
                 className="cx-in" style={{ width:"100%", resize:"vertical", marginBottom:10, fontSize:"13.5px", lineHeight:1.5 }}/>
               <div style={{ display:"flex", gap:10, alignItems:"center", marginBottom:12 }}>
-                <span className="t-label">Envoyer le</span>
+                <span className="t-label">{t('tools.sendOnLabel')}</span>
                 <input type="date" value={schedDate} min={new Date().toLocaleDateString('fr-CA')}
                   onChange={e=>setSchedDate(e.target.value)}
                   className="cx-in" style={{ padding:"9px 12px", colorScheme:"dark" }}/>
               </div>
-              <AthletePicker athletes={athletes} all={schedAll} onAllChange={v=>{ setSchedAll(v); if (v) setSchedIds([]); }} selected={schedIds} onChange={setSchedIds}/>
+              <AthletePicker athletes={athletes} all={schedAll} onAllChange={v=>{ setSchedAll(v); if (v) setSchedIds([]); }} selected={schedIds} onChange={setSchedIds} t={t}/>
               <div style={{ display:"flex", gap:10, alignItems:"center", flexWrap:"wrap", marginTop:16 }}>
                 <button onClick={addScheduled} disabled={schedSaving || !schedText.trim() || !schedDate || (!schedAll && schedIds.length===0)}
                   className="cx-btn cx-btn-gold" style={{ padding:"10px 18px", fontSize:"13px", opacity:(schedSaving || !schedText.trim() || !schedDate || (!schedAll && schedIds.length===0))?0.5:1 }}>
-                  {schedSaving ? "…" : "Programmer"}
+                  {schedSaving ? "…" : t('tools.programBtn')}
                 </button>
                 {schedMsg && <span style={{ fontSize:"12.5px", color: schedMsg.ok?"var(--green)":"var(--amber)" }}>{schedMsg.text}</span>}
               </div>
@@ -2603,61 +2620,61 @@ export default function CoachDashboard() {
       {view === 'profil' && (
       <div style={{ maxWidth:720, margin:"0 auto", padding:"24px 16px" }}>
         {!profile ? (
-          <div style={{ color:"var(--txt-3)", padding:40, textAlign:"center" }}>Chargement…</div>
+          <div style={{ color:"var(--txt-3)", padding:40, textAlign:"center" }}>{t('common.loading')}</div>
         ) : (
         <>
           {/* Marque blanche : logo */}
           <div className="cx-inner" style={{ padding:"20px 22px", marginBottom:18 }}>
-            <div style={{ fontFamily:"var(--serif)", fontSize:18, fontWeight:600, color:"var(--cream)", marginBottom:6 }}>Ta marque</div>
-            <div style={{ fontSize:12.5, color:"var(--txt-3)", marginBottom:16 }}>Ton logo apparaît en en-tête des rapports envoyés à tes élèves.</div>
+            <div style={{ fontFamily:"var(--serif)", fontSize:18, fontWeight:600, color:"var(--cream)", marginBottom:6 }}>{t('profile.brandTitle')}</div>
+            <div style={{ fontSize:12.5, color:"var(--txt-3)", marginBottom:16 }}>{t('profile.brandDesc')}</div>
             <div style={{ display:"flex", alignItems:"center", gap:16 }}>
               <div style={{ width:88, height:88, borderRadius:12, background:"#fff", border:"1px solid var(--line)", display:"flex", alignItems:"center", justifyContent:"center", overflow:"hidden" }}>
-                {profile.logo ? <img src={profile.logo} alt="logo" style={{ maxWidth:"100%", maxHeight:"100%", objectFit:"contain" }}/> : <span style={{ color:"#bbb", fontSize:12 }}>Aucun logo</span>}
+                {profile.logo ? <img src={profile.logo} alt="logo" style={{ maxWidth:"100%", maxHeight:"100%", objectFit:"contain" }}/> : <span style={{ color:"#bbb", fontSize:12 }}>{t('profile.noLogo')}</span>}
               </div>
               <div style={{ display:"flex", flexDirection:"column", gap:8 }}>
                 <label className="cx-icon-btn" style={{ cursor:"pointer", padding:"9px 14px", textAlign:"center" }}>
-                  {profile.logo ? 'Changer le logo' : 'Ajouter un logo'}
+                  {profile.logo ? t('profile.changeLogo') : t('profile.addLogo')}
                   <input type="file" accept="image/png,image/jpeg,image/webp" style={{ display:"none" }} onChange={e=>uploadLogo(e.target.files?.[0])}/>
                 </label>
-                {profile.logo && <button onClick={removeLogo} className="cx-icon-btn" style={{ padding:"9px 14px" }}>Retirer</button>}
-                <div style={{ fontSize:11, color:"var(--txt-4)" }}>PNG/JPG/WebP · max 500 Ko</div>
+                {profile.logo && <button onClick={removeLogo} className="cx-icon-btn" style={{ padding:"9px 14px" }}>{t('profile.remove')}</button>}
+                <div style={{ fontSize:11, color:"var(--txt-4)" }}>{t('profile.fileHint')}</div>
               </div>
             </div>
           </div>
 
           {/* Profil */}
           <div className="cx-inner" style={{ padding:"20px 22px", marginBottom:18 }}>
-            <div style={{ fontFamily:"var(--serif)", fontSize:18, fontWeight:600, color:"var(--cream)", marginBottom:16 }}>Profil</div>
+            <div style={{ fontFamily:"var(--serif)", fontSize:18, fontWeight:600, color:"var(--cream)", marginBottom:16 }}>{t('profile.profileTitle')}</div>
             <div style={{ marginBottom:14 }}>
-              <div className="t-label" style={{ marginBottom:8 }}>Nom affiché</div>
-              <input value={profile.displayName||''} onChange={e=>setProfile(p=>({...p, displayName:e.target.value}))} className="cx-in" style={{ width:"100%" }} placeholder="Ex: Marc Dupont"/>
+              <div className="t-label" style={{ marginBottom:8 }}>{t('profile.displayName')}</div>
+              <input value={profile.displayName||''} onChange={e=>setProfile(p=>({...p, displayName:e.target.value}))} className="cx-in" style={{ width:"100%" }} placeholder={t('profile.displayNamePh')}/>
             </div>
             <div style={{ marginBottom:14 }}>
-              <div className="t-label" style={{ marginBottom:8 }}>Spécialité</div>
-              <input value={profile.specialty||''} onChange={e=>setProfile(p=>({...p, specialty:e.target.value}))} className="cx-in" style={{ width:"100%" }} placeholder="Ex: Préparation physique, nutrition sportive"/>
+              <div className="t-label" style={{ marginBottom:8 }}>{t('profile.specialty')}</div>
+              <input value={profile.specialty||''} onChange={e=>setProfile(p=>({...p, specialty:e.target.value}))} className="cx-in" style={{ width:"100%" }} placeholder={t('profile.specialtyPh')}/>
             </div>
             <div style={{ marginBottom:16 }}>
-              <div className="t-label" style={{ marginBottom:8 }}>Bio</div>
-              <textarea value={profile.bio||''} onChange={e=>setProfile(p=>({...p, bio:e.target.value}))} className="cx-in" style={{ width:"100%", minHeight:80, resize:"vertical" }} placeholder="Quelques mots sur toi"/>
+              <div className="t-label" style={{ marginBottom:8 }}>{t('profile.bio')}</div>
+              <textarea value={profile.bio||''} onChange={e=>setProfile(p=>({...p, bio:e.target.value}))} className="cx-in" style={{ width:"100%", minHeight:80, resize:"vertical" }} placeholder={t('profile.bioPh')}/>
             </div>
             <div style={{ display:"flex", alignItems:"center", gap:12 }}>
-              <button onClick={saveProfileFields} disabled={profileSaving} className="cx-icon-btn" style={{ padding:"10px 18px", color:"var(--gold)", borderColor:"var(--line-gold)" }}>{profileSaving?'…':'Enregistrer'}</button>
+              <button onClick={saveProfileFields} disabled={profileSaving} className="cx-icon-btn" style={{ padding:"10px 18px", color:"var(--gold)", borderColor:"var(--line-gold)" }}>{profileSaving?'…':t('profile.save')}</button>
               {profileMsg && <span style={{ fontSize:12.5, color:"var(--txt-3)" }}>{profileMsg}</span>}
             </div>
           </div>
 
           {/* Abonnement */}
           <div className="cx-inner" style={{ padding:"20px 22px", marginBottom:18 }}>
-            <div style={{ fontFamily:"var(--serif)", fontSize:18, fontWeight:600, color:"var(--cream)", marginBottom:6 }}>Abonnement</div>
-            <div style={{ fontSize:12.5, color:"var(--txt-3)", marginBottom:16 }}>Gère ta facturation et tes places d'élèves.</div>
-            <button onClick={()=>window.alert('La gestion de la facturation sera disponible au lancement des abonnements coach.')} className="cx-icon-btn" style={{ padding:"10px 18px" }}>Gérer mon abonnement</button>
+            <div style={{ fontFamily:"var(--serif)", fontSize:18, fontWeight:600, color:"var(--cream)", marginBottom:6 }}>{t('profile.subscriptionTitle')}</div>
+            <div style={{ fontSize:12.5, color:"var(--txt-3)", marginBottom:16 }}>{t('profile.subscriptionDesc')}</div>
+            <button onClick={()=>window.alert(t('profile.billingComingSoon'))} className="cx-icon-btn" style={{ padding:"10px 18px" }}>{t('profile.manageBilling')}</button>
           </div>
 
           {/* Zone sensible */}
           <div className="cx-inner" style={{ padding:"20px 22px", border:"1px solid rgba(224,85,85,0.3)" }}>
-            <div style={{ fontFamily:"var(--serif)", fontSize:18, fontWeight:600, color:"#e07a7a", marginBottom:6 }}>Zone sensible</div>
-            <div style={{ fontSize:12.5, color:"var(--txt-3)", marginBottom:16 }}>La suppression est définitive. Tes élèves seront déliés et conserveront leurs données.</div>
-            <button onClick={deleteAccount} style={{ padding:"10px 18px", background:"transparent", border:"1px solid rgba(224,85,85,0.5)", color:"#e07a7a", borderRadius:10, cursor:"pointer", fontSize:13 }}>Supprimer mon compte</button>
+            <div style={{ fontFamily:"var(--serif)", fontSize:18, fontWeight:600, color:"#e07a7a", marginBottom:6 }}>{t('profile.dangerZoneTitle')}</div>
+            <div style={{ fontSize:12.5, color:"var(--txt-3)", marginBottom:16 }}>{t('profile.dangerZoneDesc')}</div>
+            <button onClick={deleteAccount} style={{ padding:"10px 18px", background:"transparent", border:"1px solid rgba(224,85,85,0.5)", color:"#e07a7a", borderRadius:10, cursor:"pointer", fontSize:13 }}>{t('profile.deleteAccountBtn')}</button>
           </div>
         </>
         )}
@@ -2669,14 +2686,14 @@ export default function CoachDashboard() {
         <div className="cx-scroll" style={{ position:"fixed", inset:0, background:"rgba(0,0,0,0.92)", zIndex:120, overflowY:"auto", padding:16 }} onClick={()=>setCompareView(null)}>
           <div style={{ maxWidth:900, margin:"0 auto" }} onClick={e=>e.stopPropagation()}>
             <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:14 }}>
-              <div style={{ fontFamily:"var(--serif)", fontSize:"22px", fontWeight:600, color:"var(--cream)" }}>Avant / après</div>
+              <div style={{ fontFamily:"var(--serif)", fontSize:"22px", fontWeight:600, color:"var(--cream)" }}>{t('media.beforeAfterTitle')}</div>
               <button onClick={()=>setCompareView(null)} style={{ background:"transparent", border:"none", fontSize:"22px", cursor:"pointer", color:"var(--txt-2)" }}>✕</button>
             </div>
             <div style={{ display:"flex", gap:12, flexWrap:"wrap" }}>
               {[...compareView].sort((x,y)=>new Date(x.date)-new Date(y.date)).map((m,i)=>(
                 <div key={m.id} style={{ flex:"1 1 300px", minWidth:0 }}>
                   <div style={{ fontSize:"12px", color:"var(--txt-3)", marginBottom:6, textAlign:"center" }}>
-                    {i===0?'Avant':'Après'} · {new Date(m.date).toLocaleDateString('fr-FR')}{m.weight?` · ${m.weight} kg`:''}{m.isReference?' · ★':''}
+                    {i===0?t('media.before'):t('media.after')} · {new Date(m.date).toLocaleDateString(intlLocale(locale))}{m.weight?` · ${m.weight} kg`:''}{m.isReference?' · ★':''}
                   </div>
                   <img src={m.url} alt="" style={{ width:"100%", borderRadius:8, background:"#000" }}/>
                 </div>
@@ -2692,8 +2709,8 @@ export default function CoachDashboard() {
           <div className="cx-modal" style={{ maxWidth:600, margin:"0 auto", padding:"26px 24px" }} onClick={e=>e.stopPropagation()}>
             <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:22 }}>
               <div>
-                <div style={{ fontFamily:"var(--serif)", fontSize:"22px", fontWeight:600, color:"var(--cream)" }}>Programme nutrition</div>
-                <div style={{ fontSize:"12.5px", color:"var(--txt-3)", marginTop:4 }}>{programModal.name} · personnalisé par IA selon profil + bilan</div>
+                <div style={{ fontFamily:"var(--serif)", fontSize:"22px", fontWeight:600, color:"var(--cream)" }}>{t('programModal.title')}</div>
+                <div style={{ fontSize:"12.5px", color:"var(--txt-3)", marginTop:4 }}>{t('programModal.subtitle', { name: programModal.name })}</div>
               </div>
               {!programLoading && <button onClick={()=>{ setProgramModal(null); setGeneratedProgram(null); }} style={{ background:"transparent", border:"none", fontSize:"22px", cursor:"pointer", color:"var(--txt-2)" }}>✕</button>}
             </div>
@@ -2702,7 +2719,7 @@ export default function CoachDashboard() {
               <div>
                 {/* Config */}
                 <div style={{ marginBottom:16 }}>
-                  <div className="t-label" style={{ marginBottom:8 }}>Repas principaux</div>
+                  <div className="t-label" style={{ marginBottom:8 }}>{t('programModal.mainMeals')}</div>
                   <div style={{ display:"flex", gap:8, marginBottom:16 }}>
                     {[2,3,4,5].map(n => (
                       <button key={n} onClick={() => setProgramConfig(p => ({ ...p, mainMeals: n }))}
@@ -2711,7 +2728,7 @@ export default function CoachDashboard() {
                       </button>
                     ))}
                   </div>
-                  <div className="t-label" style={{ marginBottom:8 }}>Collations</div>
+                  <div className="t-label" style={{ marginBottom:8 }}>{t('programModal.snacks')}</div>
                   <div style={{ display:"flex", gap:8 }}>
                     {[0,1,2,3].map(n => (
                       <button key={n} onClick={() => setProgramConfig(p => ({ ...p, snacks: n }))}
@@ -2722,9 +2739,9 @@ export default function CoachDashboard() {
                   </div>
                 </div>
                 {[
-                  { k:'preferences', l:'Préférences alimentaires', ph:'Ex: végétarien, aime les légumineuses…' },
-                  { k:'avoidFoods', l:'Aliments à éviter', ph:'Ex: gluten, lactose, fruits de mer…' },
-                  { k:'coachNotes', l:'Notes pour l\'IA', ph:'Ex: semaine de compétition, blessure genou…' },
+                  { k:'preferences', l:t('programModal.preferencesLabel'), ph:t('programModal.preferencesPh') },
+                  { k:'avoidFoods', l:t('programModal.avoidFoodsLabel'), ph:t('programModal.avoidFoodsPh') },
+                  { k:'coachNotes', l:t('programModal.coachNotesLabel'), ph:t('programModal.coachNotesPh') },
                 ].map(f => (
                   <div key={f.k} style={{ marginBottom:16 }}>
                     <div className="t-label" style={{ marginBottom:8 }}>{f.l}</div>
@@ -2733,13 +2750,13 @@ export default function CoachDashboard() {
                   </div>
                 ))}
                 {/* Depuis un modèle nutrition */}
-                {templates.filter(t=>t.type==='nutrition').length > 0 && (
+                {templates.filter(tpl=>tpl.type==='nutrition').length > 0 && (
                   <div className="cx-inner" style={{ padding:"16px 18px", marginBottom:16 }}>
-                    <div className="t-label" style={{ marginBottom:10 }}>Depuis un modèle</div>
-                    {templates.filter(t=>t.type==='nutrition').map(t=>(
-                      <button key={t.id} onClick={()=>applyNutritionTemplate(t)} className="cx-tile"
+                    <div className="t-label" style={{ marginBottom:10 }}>{t('programModal.fromTemplate')}</div>
+                    {templates.filter(tpl=>tpl.type==='nutrition').map(tpl=>(
+                      <button key={tpl.id} onClick={()=>applyNutritionTemplate(tpl)} className="cx-tile"
                         style={{ width:"100%", display:"block", textAlign:"left", padding:"10px 12px", color:"var(--green)", marginBottom:6 }}>
-                        {t.name}
+                        {tpl.name}
                       </button>
                     ))}
                   </div>
@@ -2751,7 +2768,7 @@ export default function CoachDashboard() {
                 )}
                 <button onClick={generateProgram} disabled={programLoading} className="cx-btn"
                   style={{ width:"100%", padding:"14px", background:"transparent", border:"1px solid var(--green)", color:"var(--green)", fontSize:"14px", fontWeight:600, cursor:programLoading?"not-allowed":"pointer", marginTop:4, opacity:programLoading?0.6:1 }}>
-                  {programLoading ? "Génération en cours… (30-60s)" : "Générer le programme"}
+                  {programLoading ? t('programModal.generating') : t('programModal.generateBtn')}
                 </button>
                 {!programLoading && <button onClick={async()=>{
                   const empty = buildEmptyNutritionProgram(programConfig);
@@ -2759,15 +2776,15 @@ export default function CoachDashboard() {
                   const data = await res.json();
                   if (data.program) setGeneratedProgram(data.program);
                 }} className="cx-btn cx-btn-ghost" style={{ width:"100%", padding:"13px", fontSize:"13.5px", marginTop:10 }}>
-                  Remplir moi-même
+                  {t('programModal.fillMyself')}
                 </button>}
               </div>
             ) : (
               <div>
                 {/* Programme généré — éditable inline (le coach corrige la sortie IA) */}
-                <div style={{ fontSize:"12.5px", color:"var(--green)", marginBottom:10 }}>Tu peux modifier chaque champ avant d'envoyer</div>
+                <div style={{ fontSize:"12.5px", color:"var(--green)", marginBottom:10 }}>{t('programModal.canEdit')}</div>
                 <div className="cx-inner" style={{ borderColor:"#2a4030", padding:"16px 18px", marginBottom:16 }}>
-                  <div className="t-label" style={{ color:"var(--green)", marginBottom:6 }}>Conseils de la semaine</div>
+                  <div className="t-label" style={{ color:"var(--green)", marginBottom:6 }}>{t('programModal.weeklyAdvice')}</div>
                   <Ed block value={generatedProgram.weeklyNotes || ''} onChange={v => setGeneratedProgram(p => ({ ...p, weeklyNotes: v }))}
                     style={{ fontSize:"13.5px", color:"var(--txt)", lineHeight:1.6, borderBottom:"none", width:"100%" }} />
                 </div>
@@ -2778,18 +2795,18 @@ export default function CoachDashboard() {
                       <div key={mi} className="cx-inner" style={{ padding:"10px 14px", marginBottom:8 }}>
                         <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:6 }}>
                           <Ed value={meal.type} onChange={v => editNutMeal(di, mi, 'type', v)} style={{ fontSize:"13px", fontWeight:500, color:"var(--green)" }} />
-                          <div style={{ fontSize:"12px", color:"var(--txt-3)" }}>{meal.totalKcal} kcal · {meal.totalProtein}g prot</div>
+                          <div style={{ fontSize:"12px", color:"var(--txt-3)" }}>{t('programModal.kcalProt', { kcal: meal.totalKcal, protein: meal.totalProtein })}</div>
                         </div>
                         {(meal.items || []).map((item, ii) => (
                           <div key={ii} style={{ fontSize:"13px", color:"var(--txt)", lineHeight:1.8, display:"flex", alignItems:"center", gap:6 }}>
                             <Ed value={item.name} onChange={v => editNutItem(di, mi, ii, 'name', v)} style={{ color:"var(--cream)" }} />
                             <Ed value={item.quantity} onChange={v => editNutItem(di, mi, ii, 'quantity', v)} style={{ color:"var(--txt-3)", fontSize:"12px" }} />
-                            <button onClick={() => deleteNutItem(di, mi, ii)} title="Supprimer"
+                            <button onClick={() => deleteNutItem(di, mi, ii)} title={t('programModal.deleteTitle')}
                               style={{ marginLeft:"auto", background:"transparent", border:"none", color:"var(--txt-4)", cursor:"pointer", fontSize:"14px", lineHeight:1 }}>✕</button>
                           </div>
                         ))}
                         <button onClick={() => addNutItem(di, mi)}
-                          style={{ marginTop:6, background:"transparent", border:"1px dashed var(--line)", borderRadius:"var(--r-sm)", color:"var(--green)", cursor:"pointer", fontSize:"12px", padding:"4px 10px" }}>+ aliment</button>
+                          style={{ marginTop:6, background:"transparent", border:"1px dashed var(--line)", borderRadius:"var(--r-sm)", color:"var(--green)", cursor:"pointer", fontSize:"12px", padding:"4px 10px" }}>{t('programModal.addFood')}</button>
                         <Ed block value={meal.note || ''} onChange={v => editNutMeal(di, mi, 'note', v)}
                           style={{ fontSize:"12px", color:"var(--txt-2)", marginTop:6, fontStyle:"italic", borderBottom:"none", width:"100%" }} />
                       </div>
@@ -2798,23 +2815,23 @@ export default function CoachDashboard() {
                 ))}
                 {/* Enregistrer comme modèle nutrition */}
                 <div className="cx-inner" style={{ padding:"16px 18px", marginTop:12 }}>
-                  <div className="t-label" style={{ marginBottom:10 }}>Enregistrer dans la bibliothèque</div>
-                  <input value={templateName} onChange={e=>setTemplateName(e.target.value)} placeholder="Nom du modèle…"
+                  <div className="t-label" style={{ marginBottom:10 }}>{t('programModal.saveInLibrary')}</div>
+                  <input value={templateName} onChange={e=>setTemplateName(e.target.value)} placeholder={t('programModal.templateNamePh')}
                     className="cx-in" style={{ width:"100%", marginBottom:8 }}/>
-                  <input value={templateDesc} onChange={e=>setTemplateDesc(e.target.value)} placeholder="Description (optionnel)…"
+                  <input value={templateDesc} onChange={e=>setTemplateDesc(e.target.value)} placeholder={t('programModal.templateDescPh')}
                     className="cx-in" style={{ width:"100%", marginBottom:10 }}/>
                   <button onClick={saveNutritionTemplate} disabled={!templateName.trim()||savingTemplate}
                     className="cx-btn cx-btn-ghost" style={{ width:"100%", padding:"10px 0", opacity:!templateName.trim()||savingTemplate?0.5:1 }}>
-                    {savingTemplate?"…":"Sauver le modèle"}
+                    {savingTemplate?"…":t('programModal.saveTemplate')}
                   </button>
                 </div>
                 <div style={{ display:"flex", gap:10, marginTop:16, position:"sticky", bottom:0, background:"var(--panel)", padding:"14px 0" }}>
                   <button onClick={() => setGeneratedProgram(null)} className="cx-btn cx-btn-ghost" style={{ flex:1, padding:"12px", fontSize:"13.5px" }}>
-                    Regénérer
+                    {t('programModal.regenerate')}
                   </button>
                   <button onClick={sendProgram} disabled={sendingProgram} className="cx-btn"
                     style={{ flex:2, padding:"12px", background:"var(--green)", border:"none", color:"#0e1a10", fontSize:"13.5px", fontWeight:600, cursor:sendingProgram?"not-allowed":"pointer", opacity:sendingProgram?0.6:1 }}>
-                    {sendingProgram ? "Envoi…" : `Envoyer à ${programModal.name}`}
+                    {sendingProgram ? t('programModal.sending') : t('programModal.sendTo', { name: programModal.name })}
                   </button>
                 </div>
               </div>
@@ -2829,8 +2846,8 @@ export default function CoachDashboard() {
           <div className="cx-modal" style={{ maxWidth:600, margin:"0 auto", padding:"26px 24px" }} onClick={e=>e.stopPropagation()}>
             <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:22 }}>
               <div>
-                <div style={{ fontFamily:"var(--serif)", fontSize:"22px", fontWeight:600, color:"var(--cream)" }}>Programme muscu</div>
-                <div style={{ fontSize:"12.5px", color:"var(--txt-3)", marginTop:4 }}>{muscuModal.name} · entraînement personnalisé</div>
+                <div style={{ fontFamily:"var(--serif)", fontSize:"22px", fontWeight:600, color:"var(--cream)" }}>{t('muscuModal.title')}</div>
+                <div style={{ fontSize:"12.5px", color:"var(--txt-3)", marginTop:4 }}>{t('muscuModal.subtitle', { name: muscuModal.name })}</div>
               </div>
               {!muscuProgLoading && <button onClick={()=>{ setMuscuModal(null); setGeneratedMuscuProg(null); }} style={{ background:"transparent", border:"none", fontSize:"22px", cursor:"pointer", color:"var(--txt-2)" }}>✕</button>}
             </div>
@@ -2839,7 +2856,7 @@ export default function CoachDashboard() {
               <div>
                 {/* Séances / semaine */}
                 <div style={{ marginBottom:16 }}>
-                  <div className="t-label" style={{ marginBottom:8 }}>Séances / semaine</div>
+                  <div className="t-label" style={{ marginBottom:8 }}>{t('muscuModal.sessionsPerWeek')}</div>
                   <div style={{ display:"flex", gap:8 }}>
                     {[2,3,4,5,6].map(n => (
                       <button key={n} onClick={() => setMuscuProgConfig(p => ({ ...p, daysPerWeek: n }))}
@@ -2849,48 +2866,48 @@ export default function CoachDashboard() {
                 </div>
                 {/* Objectif */}
                 <div style={{ marginBottom:16 }}>
-                  <div className="t-label" style={{ marginBottom:8 }}>Objectif</div>
+                  <div className="t-label" style={{ marginBottom:8 }}>{t('muscuModal.objective')}</div>
                   <div style={{ display:"flex", gap:8, flexWrap:"wrap" }}>
                     {['prise de masse','sèche','force','remise en forme'].map(g => (
                       <button key={g} onClick={() => setMuscuProgConfig(p => ({ ...p, goal: g }))}
-                        className={`cx-chip${muscuProgConfig.goal===g?' sel':''}`}>{g}</button>
+                        className={`cx-chip${muscuProgConfig.goal===g?' sel':''}`}>{t(`muscuOptions.goal.${g}`)}</button>
                     ))}
                   </div>
                 </div>
                 {/* Niveau */}
                 <div style={{ marginBottom:16 }}>
-                  <div className="t-label" style={{ marginBottom:8 }}>Niveau</div>
+                  <div className="t-label" style={{ marginBottom:8 }}>{t('muscuModal.level')}</div>
                   <div style={{ display:"flex", gap:8 }}>
                     {['débutant','intermédiaire','avancé'].map(l => (
                       <button key={l} onClick={() => setMuscuProgConfig(p => ({ ...p, level: l }))}
-                        className={`cx-chip${muscuProgConfig.level===l?' sel':''}`} style={{ flex:1 }}>{l}</button>
+                        className={`cx-chip${muscuProgConfig.level===l?' sel':''}`} style={{ flex:1 }}>{t(`muscuOptions.level.${l}`)}</button>
                     ))}
                   </div>
                 </div>
                 {/* Matériel */}
                 <div style={{ marginBottom:16 }}>
-                  <div className="t-label" style={{ marginBottom:8 }}>Matériel</div>
+                  <div className="t-label" style={{ marginBottom:8 }}>{t('muscuModal.equipment')}</div>
                   <div style={{ display:"flex", gap:8, flexWrap:"wrap" }}>
                     {['salle','maison','haltères','barre seule','sans matériel'].map(eq => (
                       <button key={eq} onClick={() => setMuscuProgConfig(p => ({ ...p, equipment: eq }))}
-                        className={`cx-chip${muscuProgConfig.equipment===eq?' sel':''}`}>{eq}</button>
+                        className={`cx-chip${muscuProgConfig.equipment===eq?' sel':''}`}>{t(`muscuOptions.equipment.${eq}`)}</button>
                     ))}
                   </div>
                 </div>
                 {/* Préférences */}
                 <div style={{ marginBottom:16 }}>
-                  <div className="t-label" style={{ marginBottom:8 }}>Contraintes / préférences</div>
-                  <input value={muscuProgConfig.preferences} onChange={e => setMuscuProgConfig(p => ({ ...p, preferences: e.target.value }))} placeholder="Ex: mal de dos, pas de squat, focus bras…"
+                  <div className="t-label" style={{ marginBottom:8 }}>{t('muscuModal.constraints')}</div>
+                  <input value={muscuProgConfig.preferences} onChange={e => setMuscuProgConfig(p => ({ ...p, preferences: e.target.value }))} placeholder={t('muscuModal.constraintsPh')}
                     className="cx-in" style={{ width:"100%" }}/>
                 </div>
                 {/* Depuis un modèle muscu */}
-                {templates.filter(t=>t.type==='muscu').length > 0 && (
+                {templates.filter(tpl=>tpl.type==='muscu').length > 0 && (
                   <div className="cx-inner" style={{ padding:"16px 18px", marginBottom:16 }}>
-                    <div className="t-label" style={{ marginBottom:10 }}>Depuis un modèle</div>
-                    {templates.filter(t=>t.type==='muscu').map(t=>(
-                      <button key={t.id} onClick={()=>applyMuscuTemplate(t)} className="cx-tile"
+                    <div className="t-label" style={{ marginBottom:10 }}>{t('muscuModal.fromTemplate')}</div>
+                    {templates.filter(tpl=>tpl.type==='muscu').map(tpl=>(
+                      <button key={tpl.id} onClick={()=>applyMuscuTemplate(tpl)} className="cx-tile"
                         style={{ width:"100%", display:"block", textAlign:"left", padding:"10px 12px", color:"var(--violet)", marginBottom:6 }}>
-                        {t.name}
+                        {tpl.name}
                       </button>
                     ))}
                   </div>
@@ -2898,7 +2915,7 @@ export default function CoachDashboard() {
                 {muscuProgError && <div style={{ background:"#1a0d0d", border:"1px solid #4a2a2a", borderRadius:"var(--r-sm)", padding:"12px 14px", marginBottom:12, fontSize:"13px", color:"var(--red)" }}>{muscuProgError}</div>}
                 <button onClick={generateCoachMuscuProgram} disabled={muscuProgLoading} className="cx-btn"
                   style={{ width:"100%", padding:"14px", background:"transparent", border:"1px solid var(--violet)", color:"var(--violet)", fontSize:"14px", fontWeight:600, cursor:muscuProgLoading?"not-allowed":"pointer", marginTop:4, opacity:muscuProgLoading?0.6:1 }}>
-                  {muscuProgLoading ? "Génération en cours… (20-40s)" : "Générer le programme"}
+                  {muscuProgLoading ? t('muscuModal.generating') : t('muscuModal.generateBtn')}
                 </button>
                 {!muscuProgLoading && <button onClick={async()=>{
                   const empty = buildEmptyMuscuProgram(muscuProgConfig);
@@ -2906,14 +2923,14 @@ export default function CoachDashboard() {
                   const data = await res.json();
                   if (data.program) setGeneratedMuscuProg(data.program);
                 }} className="cx-btn cx-btn-ghost" style={{ width:"100%", padding:"13px", fontSize:"13.5px", marginTop:10 }}>
-                  Remplir moi-même
+                  {t('muscuModal.fillMyself')}
                 </button>}
               </div>
             ) : (
               <div>
-                <div style={{ fontSize:"12.5px", color:"var(--violet)", marginBottom:10 }}>Tu peux modifier chaque champ avant d'envoyer</div>
+                <div style={{ fontSize:"12.5px", color:"var(--violet)", marginBottom:10 }}>{t('muscuModal.canEdit')}</div>
                 <div className="cx-inner" style={{ borderColor:"#2e2a40", padding:"16px 18px", marginBottom:16 }}>
-                  <div className="t-label" style={{ color:"var(--violet)", marginBottom:6 }}>Conseils</div>
+                  <div className="t-label" style={{ color:"var(--violet)", marginBottom:6 }}>{t('muscuModal.advice')}</div>
                   <Ed block value={generatedMuscuProg.weeklyNotes || ''} onChange={v => setGeneratedMuscuProg(p => ({ ...p, weeklyNotes: v }))}
                     style={{ fontSize:"13.5px", color:"var(--txt)", lineHeight:1.6, borderBottom:"none", width:"100%" }} />
                 </div>
@@ -2925,12 +2942,12 @@ export default function CoachDashboard() {
                     {(day.exercises||[]).map((ex, ei) => (
                       <div key={ei} className="cx-inner" style={{ padding:"10px 14px", marginBottom:8 }}>
                         <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", gap:8 }}>
-                          <ExoNameInput value={ex.name} onChange={v => editMuscuEx(di, ei, 'name', v)} style={{ fontSize:"13.5px", fontWeight:500, color:"var(--cream)" }} />
+                          <ExoNameInput value={ex.name} onChange={v => editMuscuEx(di, ei, 'name', v)} placeholder={t('exo.namePlaceholder')} style={{ fontSize:"13.5px", fontWeight:500, color:"var(--cream)" }} />
                           <div style={{ fontSize:"12px", color:"var(--txt-3)", display:"flex", alignItems:"center", gap:3, whiteSpace:"nowrap" }}>
                             <Ed value={String(ex.sets ?? '')} onChange={v => editMuscuEx(di, ei, 'sets', v)} style={{ color:"var(--txt-2)" }} />×
                             <Ed value={String(ex.reps ?? '')} onChange={v => editMuscuEx(di, ei, 'reps', v)} style={{ color:"var(--txt-2)" }} /> ·
                             <Ed value={ex.rest || ''} onChange={v => editMuscuEx(di, ei, 'rest', v)} style={{ color:"var(--txt-2)" }} />
-                            <button onClick={() => deleteMuscuEx(di, ei)} title="Supprimer"
+                            <button onClick={() => deleteMuscuEx(di, ei)} title={t('muscuModal.deleteTitle')}
                               style={{ background:"transparent", border:"none", color:"var(--txt-4)", cursor:"pointer", fontSize:"14px", lineHeight:1, marginLeft:4 }}>✕</button>
                           </div>
                         </div>
@@ -2939,28 +2956,28 @@ export default function CoachDashboard() {
                       </div>
                     ))}
                     <button onClick={() => addMuscuEx(di)}
-                      style={{ background:"transparent", border:"1px dashed var(--line)", borderRadius:"var(--r-sm)", color:"var(--violet)", cursor:"pointer", fontSize:"12px", padding:"4px 10px" }}>+ exercice</button>
+                      style={{ background:"transparent", border:"1px dashed var(--line)", borderRadius:"var(--r-sm)", color:"var(--violet)", cursor:"pointer", fontSize:"12px", padding:"4px 10px" }}>{t('muscuModal.addExercise')}</button>
                   </div>
                 ))}
                 {/* Enregistrer comme modèle muscu */}
                 <div className="cx-inner" style={{ padding:"16px 18px", marginTop:12 }}>
-                  <div className="t-label" style={{ marginBottom:10 }}>Enregistrer dans la bibliothèque</div>
-                  <input value={templateNameMuscu} onChange={e=>setTemplateNameMuscu(e.target.value)} placeholder="Nom du modèle…"
+                  <div className="t-label" style={{ marginBottom:10 }}>{t('muscuModal.saveInLibrary')}</div>
+                  <input value={templateNameMuscu} onChange={e=>setTemplateNameMuscu(e.target.value)} placeholder={t('muscuModal.templateNamePh')}
                     className="cx-in" style={{ width:"100%", marginBottom:8 }}/>
-                  <input value={templateDescMuscu} onChange={e=>setTemplateDescMuscu(e.target.value)} placeholder="Description (optionnel)…"
+                  <input value={templateDescMuscu} onChange={e=>setTemplateDescMuscu(e.target.value)} placeholder={t('muscuModal.templateDescPh')}
                     className="cx-in" style={{ width:"100%", marginBottom:10 }}/>
                   <button onClick={saveMuscuTemplate} disabled={!templateNameMuscu.trim()||savingTemplateMuscu}
                     className="cx-btn cx-btn-ghost" style={{ width:"100%", padding:"10px 0", opacity:!templateNameMuscu.trim()||savingTemplateMuscu?0.5:1 }}>
-                    {savingTemplateMuscu?"…":"Sauver le modèle"}
+                    {savingTemplateMuscu?"…":t('muscuModal.saveTemplate')}
                   </button>
                 </div>
                 <div style={{ display:"flex", gap:10, marginTop:16, position:"sticky", bottom:0, background:"var(--panel)", padding:"14px 0" }}>
                   <button onClick={() => setGeneratedMuscuProg(null)} className="cx-btn cx-btn-ghost" style={{ flex:1, padding:"12px", fontSize:"13.5px" }}>
-                    Regénérer
+                    {t('muscuModal.regenerate')}
                   </button>
                   <button onClick={sendMuscuProgram} disabled={sendingMuscuProg} className="cx-btn"
                     style={{ flex:2, padding:"12px", background:"var(--violet)", border:"none", color:"#14101e", fontSize:"13.5px", fontWeight:600, cursor:sendingMuscuProg?"not-allowed":"pointer", opacity:sendingMuscuProg?0.6:1 }}>
-                    {sendingMuscuProg ? "Envoi…" : `Envoyer à ${muscuModal.name}`}
+                    {sendingMuscuProg ? t('muscuModal.sending') : t('muscuModal.sendTo', { name: muscuModal.name })}
                   </button>
                 </div>
               </div>
@@ -2975,11 +2992,11 @@ export default function CoachDashboard() {
           <div style={{ maxWidth:640, margin:"0 auto", background:"#faf6ee", borderRadius:16, padding:"28px 24px" }} onClick={e=>e.stopPropagation()}>
             <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:16 }}>
               <div>
-                <div style={{ fontFamily:"Georgia,serif", fontSize:"24px", color:"#2a1a00" }}>Rapport — {reportAthlete}</div>
-                <div style={{ fontSize:"13.5px", color:"#8a7a5a", marginTop:2 }}>{reportDays}j · {new Date().toLocaleDateString("fr-FR")} · <span style={{ color:"#a08060" }}>Cliquez dans le texte pour modifier</span></div>
+                <div style={{ fontFamily:"Georgia,serif", fontSize:"24px", color:"#2a1a00" }}>{t('reportModal.title', { name: reportAthlete })}</div>
+                <div style={{ fontSize:"13.5px", color:"#8a7a5a", marginTop:2 }}>{reportDays}j · {new Date().toLocaleDateString(intlLocale(locale))} · <span style={{ color:"#a08060" }}>{t('reportModal.clickToEdit')}</span></div>
               </div>
               <div style={{ display:"flex", gap:8 }}>
-                <button onClick={() => exportPDF(reportEditRef.current?.innerHTML || reportHtml, reportAthlete, reportDays)} style={{ background:"transparent", border:"1px solid #c8b890", borderRadius:8, padding:"5px 10px", fontSize:"12.5px", color:"var(--gold)", cursor:"pointer", fontFamily:"Georgia,serif" }}>⬇ PDF</button>
+                <button onClick={() => exportPDF(reportEditRef.current?.innerHTML || reportHtml, reportAthlete, reportDays)} style={{ background:"transparent", border:"1px solid #c8b890", borderRadius:8, padding:"5px 10px", fontSize:"12.5px", color:"var(--gold)", cursor:"pointer", fontFamily:"Georgia,serif" }}>{t('reportModal.pdf')}</button>
                 <button onClick={()=>{ setReportHtml(null); setReportSent(false); }} style={{ background:"transparent", border:"none", fontSize:"1.2rem", cursor:"pointer", color:"#8a7a5a" }}>✕</button>
               </div>
             </div>
@@ -2993,12 +3010,12 @@ export default function CoachDashboard() {
             <div style={{ marginTop:20, display:"flex", gap:8 }}>
               {reportSent ? (
                 <div style={{ flex:1, padding:"12px", background:"#e8f5e8", border:"1px solid #7abf8a", borderRadius:10, color:"#3a7a3a", fontFamily:"Georgia,serif", fontSize:"14.5px", textAlign:"center" }}>
-                  ✓ Rapport envoyé à {reportAthlete}
+                  {t('reportModal.sentTo', { name: reportAthlete })}
                 </div>
               ) : (
                 <button onClick={sendReportToPatient} disabled={reportSending || !reportAthleteId}
                   style={{ flex:1, padding:"12px", background:reportSending?"var(--txt)":"#2a1a00", border:"none", borderRadius:10, color:reportSending?"#8a7a5a":"#f0e6c8", fontFamily:"Georgia,serif", fontSize:"14.5px", fontWeight:500, cursor:reportSending||!reportAthleteId?"not-allowed":"pointer", opacity:!reportAthleteId?0.5:1 }}>
-                  {reportSending ? "Envoi en cours…" : `Valider et envoyer à ${reportAthlete}`}
+                  {reportSending ? t('reportModal.sending') : t('reportModal.validateAndSendTo', { name: reportAthlete })}
                 </button>
               )}
             </div>

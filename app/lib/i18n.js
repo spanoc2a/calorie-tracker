@@ -9,9 +9,28 @@ export function detectLocale() {
   return SUPPORTED.includes(lang) ? lang : 'en';
 }
 
+export function setStoredLocale(lang) {
+  if (typeof window === 'undefined') return;
+  try { localStorage.setItem('lang', lang); } catch {}
+  window.dispatchEvent(new Event('nutrainer-lang'));
+}
+
 export function useLocale() {
   const [locale, setLocale] = useState('fr');
-  useEffect(() => { setLocale(detectLocale()); }, []);
+  useEffect(() => {
+    function readLocale() {
+      let stored = null;
+      try { stored = localStorage.getItem('lang'); } catch {}
+      setLocale(stored && SUPPORTED.includes(stored) ? stored : detectLocale());
+    }
+    readLocale();
+    window.addEventListener('nutrainer-lang', readLocale);
+    window.addEventListener('storage', readLocale);
+    return () => {
+      window.removeEventListener('nutrainer-lang', readLocale);
+      window.removeEventListener('storage', readLocale);
+    };
+  }, []);
   const t = (key) => {
     const path = key.split('.');
     let val = path.reduce((o, k) => o?.[k], T[locale]);
@@ -274,6 +293,13 @@ const T = {
       coach_manages: 'Ton coach gère tes programmes',
       save_cancel: ['Sauvegarder', 'Annuler'],
     },
+    login: {
+      confirm_password: 'Confirmer le mot de passe',
+      pwd_no_match: 'Les mots de passe ne correspondent pas',
+      pwd_match: 'Les mots de passe correspondent ✓',
+      err_pwd_mismatch: 'Les mots de passe ne correspondent pas.',
+      lang_label: 'Langue',
+    },
   },
 
   en: {
@@ -526,6 +552,13 @@ const T = {
       notif_goals: (name) => `🎯 ${name} updated your goals`,
       coach_manages: 'Your coach manages your programs',
     },
+    login: {
+      confirm_password: 'Confirm password',
+      pwd_no_match: 'Passwords do not match',
+      pwd_match: 'Passwords match ✓',
+      err_pwd_mismatch: 'Passwords do not match.',
+      lang_label: 'Language',
+    },
   },
 
   es: {
@@ -776,6 +809,13 @@ const T = {
       notif_report: (name) => `📄 ${name} te envió un informe nutricional`,
       notif_goals: (name) => `🎯 ${name} actualizó tus objetivos`,
       coach_manages: 'Tu entrenador gestiona tus programas',
+    },
+    login: {
+      confirm_password: 'Confirmar contraseña',
+      pwd_no_match: 'Las contraseñas no coinciden',
+      pwd_match: 'Las contraseñas coinciden ✓',
+      err_pwd_mismatch: 'Las contraseñas no coinciden.',
+      lang_label: 'Idioma',
     },
   },
 

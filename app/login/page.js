@@ -1,12 +1,14 @@
 "use client";
 import { useState, useEffect, Suspense } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { useLocale } from "../lib/i18n";
+import { useLocale, setStoredLocale } from "../lib/i18n";
+
+const LANGS = ["fr", "en", "es"];
 
 function LoginInner() {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const { t } = useLocale();
+  const { locale, t } = useLocale();
   const [mode, setMode] = useState("signup");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -45,7 +47,7 @@ function LoginInner() {
 
   async function submitReset(e) {
     e.preventDefault(); setError(''); setLoading(true);
-    if (newPassword !== confirmPassword) { setError('Les mots de passe ne correspondent pas.'); setLoading(false); return; }
+    if (newPassword !== confirmPassword) { setError(t('login.err_pwd_mismatch')); setLoading(false); return; }
     const res = await fetch('/api/auth/reset-password', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ token: resetToken, password: newPassword }) });
     const data = await res.json();
     if (!res.ok) { setError(data.error || t('auth.err_expired')); setLoading(false); return; }
@@ -77,12 +79,24 @@ function LoginInner() {
     } catch { setError(t('auth.err_network')); setLoading(false); }
   }
 
-  const S = { wrap: { minHeight:"100vh", background:"#0d0d0d", display:"flex", alignItems:"center", justifyContent:"center", fontFamily:"'DM Mono',monospace", padding:16 }, card: { width:"100%", maxWidth:400 }, box: { background:"#1a1a1a", border:"1px solid #2a2a2a", borderRadius:16, padding:24 }, input: { width:"100%", background:"#0d0d0d", border:"1px solid #2a2a2a", borderRadius:8, padding:"10px 12px", color:"#e8e0d0", fontFamily:"'DM Mono',monospace", fontSize:"0.8rem", outline:"none" }, btn: { width:"100%", padding:"12px", background:"#c8b890", color:"#0d0d0d", border:"none", borderRadius:8, fontFamily:"'DM Mono',monospace", fontSize:"0.72rem", cursor:"pointer" }, lbl: { fontSize:"0.6rem", color:"#4a4a3a", letterSpacing:2, textTransform:"uppercase", marginBottom:6 } };
+  const S = { wrap: { minHeight:"100vh", background:"#0d0d0d", display:"flex", alignItems:"center", justifyContent:"center", fontFamily:"'DM Mono',monospace", padding:16 }, card: { width:"100%", maxWidth:400, position:"relative" }, box: { background:"#1a1a1a", border:"1px solid #2a2a2a", borderRadius:16, padding:24 }, input: { width:"100%", background:"#0d0d0d", border:"1px solid #2a2a2a", borderRadius:8, padding:"10px 12px", color:"#e8e0d0", fontFamily:"'DM Mono',monospace", fontSize:"0.8rem", outline:"none" }, btn: { width:"100%", padding:"12px", background:"#c8b890", color:"#0d0d0d", border:"none", borderRadius:8, fontFamily:"'DM Mono',monospace", fontSize:"0.72rem", cursor:"pointer" }, lbl: { fontSize:"0.6rem", color:"#4a4a3a", letterSpacing:2, textTransform:"uppercase", marginBottom:6 } };
+
+  const langSwitcher = (
+    <div style={{ position:"absolute", top:0, right:0, display:"flex", gap:4 }} role="group" aria-label={t('login.lang_label')}>
+      {LANGS.map(l => (
+        <button key={l} type="button" onClick={()=>setStoredLocale(l)}
+          style={{ padding:"2px 6px", background: locale===l ? "#c8b890" : "transparent", border:`1px solid ${locale===l ? "#c8b890" : "#2a2a2a"}`, borderRadius:6, fontFamily:"'DM Mono',monospace", fontSize:"0.55rem", color: locale===l ? "#0d0d0d" : "#4a4a3a", cursor:"pointer", letterSpacing:1, textTransform:"uppercase" }}>
+          {l}
+        </button>
+      ))}
+    </div>
+  );
 
   if (forgotMode === 'reset') return (
     <div style={S.wrap}>
       <style>{`@import url('https://fonts.googleapis.com/css2?family=Playfair+Display:wght@400;700&family=DM+Mono:wght@300;400;500&display=swap');`}</style>
       <div style={S.card}>
+        {langSwitcher}
         <div style={{ textAlign:"center", marginBottom:32 }}><div style={{ fontFamily:"'Playfair Display',serif", fontSize:"2rem", color:"#f0e6c8" }}>Nutrainer</div></div>
         <div style={S.box}>
           {resetDone ? (
@@ -96,10 +110,10 @@ function LoginInner() {
                 <input type="password" value={newPassword} onChange={e=>setNewPassword(e.target.value)} required minLength={6} placeholder="••••••••" style={S.input}/>
               </div>
               <div style={{ marginBottom:16 }}>
-                <div style={S.lbl}>Confirmer le mot de passe</div>
+                <div style={S.lbl}>{t('login.confirm_password')}</div>
                 <input type="password" value={confirmPassword} onChange={e=>setConfirmPassword(e.target.value)} required minLength={6} placeholder="••••••••" style={{ ...S.input, borderColor: confirmPassword && confirmPassword !== newPassword ? '#c87070' : confirmPassword && confirmPassword === newPassword ? '#4a7a5a' : '#2a2a2a' }}/>
-                {confirmPassword && confirmPassword !== newPassword && <div style={{ fontSize:"0.58rem", color:"#c87070", marginTop:4 }}>Les mots de passe ne correspondent pas</div>}
-                {confirmPassword && confirmPassword === newPassword && <div style={{ fontSize:"0.58rem", color:"#7abf8a", marginTop:4 }}>Les mots de passe correspondent ✓</div>}
+                {confirmPassword && confirmPassword !== newPassword && <div style={{ fontSize:"0.58rem", color:"#c87070", marginTop:4 }}>{t('login.pwd_no_match')}</div>}
+                {confirmPassword && confirmPassword === newPassword && <div style={{ fontSize:"0.58rem", color:"#7abf8a", marginTop:4 }}>{t('login.pwd_match')}</div>}
               </div>
               {error && <div style={{ fontSize:"0.65rem", color:"#c87070", marginBottom:12, padding:"8px 12px", background:"#1a0d0d", borderRadius:6 }}>{error}</div>}
               <button type="submit" disabled={loading || newPassword !== confirmPassword} style={{ ...S.btn, opacity:(loading || newPassword !== confirmPassword)?0.5:1, cursor:(loading || newPassword !== confirmPassword)?"not-allowed":"pointer" }}>{loading ? "..." : t('auth.save')}</button>
@@ -114,6 +128,7 @@ function LoginInner() {
     <div style={S.wrap}>
       <style>{`@import url('https://fonts.googleapis.com/css2?family=Playfair+Display:wght@400;700&family=DM+Mono:wght@300;400;500&display=swap');`}</style>
       <div style={S.card}>
+        {langSwitcher}
         <div style={{ textAlign:"center", marginBottom:32 }}>
           <div style={{ fontFamily:"'Playfair Display',serif", fontSize:"2rem", color:"#f0e6c8" }}>Nutrainer</div>
           <div style={{ fontSize:"0.6rem", color:"#4a4a3a", letterSpacing:3, textTransform:"uppercase", marginTop:6 }}>{t('auth.tagline')}</div>
