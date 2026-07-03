@@ -2,6 +2,7 @@ import { db, userDb } from '../../../api/db';
 import { getUser } from '../../users';
 import { requireAuth } from '../../../api/auth/session';
 import { getHealthContext, buildStravaContext } from '../../../lib/healthContext';
+import { EXERCISE_NAMES } from '../../../lib/exerciseNames';
 
 export const maxDuration = 120;
 
@@ -56,7 +57,8 @@ Format exact :
 - Matériel : ${equipment}
 - 5 à 7 exercices par séance
 - Répartition intelligente des groupes musculaires
-- Exercices avec nom précis, sets, reps, temps de repos, note technique si pertinent`;
+- Exercices avec nom précis, sets, reps, temps de repos, note technique si pertinent
+- Pour le nom de chaque exercice, utilise EXCLUSIVEMENT un nom de cette liste (recopié à l'identique) : ${EXERCISE_NAMES.join(', ')}`;
 
     const stravaCtx = buildStravaContext(stravaCache, { periodLabel: '7j' });
     const stravaInstr = stravaCtx

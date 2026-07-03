@@ -1,8 +1,83 @@
 import { db, userDb } from '../../db';
 import { runBatchedCron } from '../../../lib/cronBatch';
 import { getUserWithPlan, isPro } from '../../../lib/planServer';
+import { sendPushToUser } from '../../push/send/route';
+import { sendExpoPushToUser } from '../../../lib/expoPush';
 
 export const maxDuration = 300;
+
+// ── Séance du jour ─────────────────────────────────────────────────────────────
+// Résolution de la séance prévue aujourd'hui à partir d'un programme muscu
+// (days[].day = noms génériques type « Lundi ») + des overrides datés
+// sessionSchedule = { 'YYYY-MM-DD': { dayLabel, skipped } } (voir /api/session-schedule).
+
+const WEEKDAY_NAMES = [
+  ['dimanche', 'sunday', 'domingo'],
+  ['lundi', 'monday', 'lunes'],
+  ['mardi', 'tuesday', 'martes'],
+  ['mercredi', 'wednesday', 'miércoles'],
+  ['jeudi', 'thursday', 'jueves'],
+  ['vendredi', 'friday', 'viernes'],
+  ['samedi', 'saturday', 'sábado'],
+];
+
+function parisToday() {
+  return new Date().toLocaleDateString('fr-CA', { timeZone: 'Europe/Paris' });
+}
+
+function parisWeekdayIndex() {
+  const short = new Intl.DateTimeFormat('en-US', { weekday: 'short', timeZone: 'Europe/Paris' }).format(new Date());
+  return ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].indexOf(short);
+}
+
+// → { label } si une séance est prévue aujourd'hui, sinon null.
+function resolveTodaySession(program, overrides) {
+  const days = program?.days;
+  if (!Array.isArray(days) || days.length === 0) return null;
+  const norm = (s) => String(s || '').trim().toLowerCase();
+  const o = overrides?.[parisToday()];
+  if (o) {
+    if (o.dayLabel) {
+      // Séance déplacée SUR aujourd'hui : retrouver le jour de programme correspondant.
+      const day = days.find(d => norm(d.day) === norm(o.dayLabel) || norm(d.label) === norm(o.dayLabel));
+      return { label: day?.label || day?.day || String(o.dayLabel) };
+    }
+    if (o.skipped) return null; // séance du jour sautée/déplacée ailleurs
+    return null;
+  }
+  const names = WEEKDAY_NAMES[parisWeekdayIndex()] || [];
+  const day = days.find(d => names.includes(norm(d.day)));
+  return day ? { label: day.label || day.day } : null;
+}
+
+// Élève coaché : pas d'IA (règle « IA invisible ») mais un rappel factuel de la séance
+// du jour issue du programme envoyé par son coach. 1 envoi max par jour.
+async function processCoachedSessionReminder(userId) {
+  const udb = userDb(userId);
+  const today = parisToday();
+
+  // Idempotence : ne pas renvoyer si déjà envoyé aujourd'hui (relance du cron, etc.)
+  const last = await udb.get('lastSessionReminder');
+  if (last === today) return false;
+
+  const [programs, overrides] = await Promise.all([
+    udb.get('coachMuscuPrograms').then(p => (p || []).filter(x => x.status === 'sent')),
+    udb.get('sessionSchedule').then(s => s || {}),
+  ]);
+  if (programs.length === 0) return false; // même source que /api/athlete/program
+
+  const session = resolveTodaySession(programs[0], overrides);
+  if (!session) return false; // pas de séance aujourd'hui → rien
+
+  await udb.set('lastSessionReminder', today);
+  const title = `💪 Au programme aujourd'hui : ${session.label}`;
+  const body = 'Programmé par ton coach — bonne séance !';
+  await Promise.all([
+    sendPushToUser(userId, title, body, '/').catch(() => {}),
+    sendExpoPushToUser(userId, title, body, { type: 'session' }),
+  ]);
+  return true;
+}
 
 function getDateString(daysAgo) {
   const d = new Date();
@@ -117,7 +192,7 @@ function computeMorningInsights(profile, hc, yesterdayEntries, avgJournal, muscu
   return insights;
 }
 
-async function generateMorningBrief(prenom, profile, hc, yesterdayEntries, avgJournal, muscuSets, muscuProgram, weightLog, weeklySummary) {
+async function generateMorningBrief(prenom, profile, hc, yesterdayEntries, avgJournal, muscuSets, muscuProgram, weightLog, weeklySummary, todaySessionLabel) {
   const label = prenom || 'toi';
   const insights = computeMorningInsights(profile, hc, yesterdayEntries, avgJournal, muscuSets, muscuProgram, weightLog);
   const priority = insights.filter(i => /^[⚠🔴🟡↑↓]/.test(i));
@@ -130,7 +205,9 @@ async function generateMorningBrief(prenom, profile, hc, yesterdayEntries, avgJo
     : h?.trainingTrend?.includes('régression') ? `Tendance entraînement: ${h.trainingTrend}`
     : null;
 
-  const contextLines = [...toShow, ...(longTermNote ? [longTermNote] : [])];
+  const sessionNote = todaySessionLabel ? `Séance prévue aujourd'hui : ${todaySessionLabel}` : null;
+
+  const contextLines = [...toShow, ...(sessionNote ? [sessionNote] : []), ...(longTermNote ? [longTermNote] : [])];
 
   const res = await fetch('https://api.anthropic.com/v1/messages', {
     method: 'POST',
@@ -170,8 +247,9 @@ async function processMorningCoach(userId, userName) {
   const user = await getUserWithPlan(userId);
   if (!user || !isPro(user.activePlan)) return false;
   // Règle produit "IA invisible" : un élève rattaché à un coach ne reçoit JAMAIS
-  // de contenu IA non validé — son coach reste son point de contact.
-  if (user.hasCoach) return false;
+  // de contenu IA non validé — à la place, rappel factuel (non-IA) de la séance du jour
+  // issue du programme envoyé par son coach.
+  if (user.hasCoach) return processCoachedSessionReminder(userId);
 
   const udb = userDb(userId);
   const today = getDateString(0);
@@ -193,12 +271,13 @@ async function processMorningCoach(userId, userName) {
   if (!hasActivity && !settings?.goalKcal) return false;
 
   // Load context in parallel
-  const [hc, muscuSets, muscuProgram, weightLog, weeklySummary] = await Promise.all([
+  const [hc, muscuSets, muscuProgram, weightLog, weeklySummary, sessionOverrides] = await Promise.all([
     udb.get('healthConnectData'),
     udb.get('muscuSets'),
     udb.get('muscuProgram'),
     udb.get('weightLog'),
     udb.get('coachWeeklySummary'),
+    udb.get('sessionSchedule').then(s => s || {}),
   ]);
 
   // Use yesterday's entries — it's morning, today's journal is empty
@@ -218,9 +297,12 @@ async function processMorningCoach(userId, userName) {
 
   const prenom = firstName(userName || settings?.name);
 
+  // Séance prévue aujourd'hui (programme muscu solo + overrides) — mentionnée dans le brief.
+  const todaySession = resolveTodaySession(muscuProgram, sessionOverrides);
+
   const brief = await generateMorningBrief(
     prenom, settings, hc, yesterdayEntries, avgJournal,
-    muscuSets, muscuProgram, weightLog, weeklySummary
+    muscuSets, muscuProgram, weightLog, weeklySummary, todaySession?.label || null
   );
 
   if (!brief) return false;

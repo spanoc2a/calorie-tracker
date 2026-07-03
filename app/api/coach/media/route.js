@@ -64,11 +64,17 @@ export async function PATCH(req) {
     if (i >= 0 && !idx[i].viewedAt) { idx[i].viewedAt = changed.viewedAt; await db.set('media:videoIndex', idx); }
   }
 
-  // Notifier l'élève d'un nouveau commentaire
+  // Notifier l'élève d'un nouveau commentaire (web + Expo) — avec un extrait du commentaire.
   if (typeof comment === 'string' && comment.trim()) {
     try {
+      const { sendPushToUser } = await import('../../push/send/route');
       const { sendExpoPushToUser } = await import('../../../lib/expoPush');
-      await sendExpoPushToUser(athleteId, `💬 ${v.me.name || 'Ton coach'}`, 'a commenté ton suivi', { type: 'media' });
+      const title = '💬 Ton coach a réagi à ta photo';
+      const extrait = comment.trim().slice(0, 60);
+      await Promise.all([
+        sendPushToUser(athleteId, title, extrait, '/').catch(() => {}),
+        sendExpoPushToUser(athleteId, title, extrait, { type: 'media_comment' }),
+      ]);
     } catch {}
   }
   return Response.json({ ok: true, item: changed });

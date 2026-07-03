@@ -50,6 +50,25 @@ export async function POST(req) {
         await db.del(`coach:emailInvite:${user.email}`);
         const coach = await getUser(pending.coachId);
         coachName = coach?.name || 'ton coach';
+
+        // Notifier le coach du rattachement (push web + Expo + notif in-app) — fail-silent.
+        try {
+          const prenom = (name || 'Un élève').trim().split(/\s+/)[0];
+          const title = '🎉 Nouvel élève !';
+          const body = `${prenom} vient de rejoindre ton coaching.`;
+          const { sendPushToUser } = await import('../../push/send/route');
+          const { sendExpoPushToUser } = await import('../../../lib/expoPush');
+          await Promise.all([
+            sendPushToUser(pending.coachId, title, body, '/coach').catch(() => {}),
+            sendExpoPushToUser(pending.coachId, title, body, { type: 'new_athlete', athleteId: id }),
+          ]);
+          const cdb = userDb(pending.coachId);
+          const notifs = await cdb.get('coachNotifications') || [];
+          await cdb.set('coachNotifications', [{
+            id: Date.now(), date: new Date().toISOString(),
+            type: 'new_athlete', athleteId: id, athleteName: name || null, read: false,
+          }, ...notifs].slice(0, 20));
+        } catch {}
       }
     } catch {}
   }

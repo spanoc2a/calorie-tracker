@@ -43,6 +43,24 @@ async function daysSinceLastLog(udb) {
   return null;
 }
 
+// Série de jours consécutifs loggés se terminant HIER (hier inclus). Cap à 60 jours,
+// scan par paquets de 10 en remontant — appelé uniquement quand on sait que hier est loggé.
+const STREAK_CAP = 60;
+async function streakEndingYesterday(udb) {
+  let streak = 0;
+  for (let start = 1; start <= STREAK_CAP; start += 10) {
+    const size = Math.min(10, STREAK_CAP - start + 1);
+    const batch = await Promise.all(
+      Array.from({ length: size }, (_, i) => udb.get(`day:${dateKeyDaysAgo(start + i)}`))
+    );
+    for (const entries of batch) {
+      if (Array.isArray(entries) && entries.length > 0) streak++;
+      else return streak;
+    }
+  }
+  return streak;
+}
+
 // J7 exactement : alerte le coach (push web + Expo + notif in-app) si l'élève est coaché.
 async function notifyCoachInactive(user) {
   const coachId = await userDb(user.id).get('coachId');
@@ -116,8 +134,18 @@ export async function GET(req) {
       // Au-delà de 14 jours : plus de rappel quotidien, seulement 1 rappel hebdomadaire.
       if (days > 14 && days % 7 !== 0) return false;
 
+      // Streak en danger : a loggé hier mais pas encore aujourd'hui, avec une série ≥ 3 jours
+      // → message dédié qui remplace le rappel générique.
+      let streak = 0;
+      if (days === 1) {
+        try { streak = await streakEndingYesterday(udb); } catch {}
+      }
+
       let title, bodyText;
-      if (days <= 3) {
+      if (days === 1 && streak >= 3) {
+        title = `🔥 Ta série de ${streak} jours est en jeu !`;
+        bodyText = 'Logge un repas avant minuit pour la garder vivante.';
+      } else if (days <= 3) {
         const msg = EARLY_MESSAGES[(new Date().getDate() + days) % EARLY_MESSAGES.length];
         title = msg.title;
         bodyText = msg.body;
@@ -143,8 +171,9 @@ export async function GET(req) {
       }
 
       // Envoie sur les DEUX canaux disponibles (web + Expo mobile).
+      // categoryId 'log-meal' : catégorie d'actions rapides côté app (logger direct depuis la notif).
       if (sub?.endpoint) await sendPushToUser(user.id, title, bodyText, '/');
-      if (expoToken) await sendExpoPushToUser(user.id, title, bodyText, { type: 'reminder' });
+      if (expoToken) await sendExpoPushToUser(user.id, title, bodyText, { type: 'reminder' }, { categoryId: 'log-meal' });
       return true;
     },
   });

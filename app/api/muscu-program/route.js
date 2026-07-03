@@ -4,6 +4,7 @@ import { checkMuscuProgramLimit, incrementProgramUsage, upgradeResponse } from '
 import { sendExpoPushToUser } from '../../lib/expoPush';
 import { getHealthContext, buildStravaContext } from '../../lib/healthContext';
 import { rateLimit } from '../../lib/ratelimit';
+import { EXERCISE_NAMES } from '../../lib/exerciseNames';
 
 export const maxDuration = 120;
 
@@ -100,7 +101,8 @@ Format exact :
 - Répartition intelligente des groupes musculaires selon le nombre de séances
 - Exercices avec nom précis, sets, reps (peut être une fourchette), temps de repos
 - Note optionnelle par exercice pour les points techniques importants
-- weeklyNotes : conseils sur la progression, récupération, nutrition autour des séances${langInstr}${unitSystemInstr(unitSystem)}`;
+- weeklyNotes : conseils sur la progression, récupération, nutrition autour des séances${langInstr}${unitSystemInstr(unitSystem)}
+- Pour le nom de chaque exercice, utilise EXCLUSIVEMENT un nom de cette liste (recopié à l'identique) : ${EXERCISE_NAMES.join(', ')}`;
 
     const stravaCtx = buildStravaContext(stravaCache, { periodLabel: '7j' });
     const stravaInstr = stravaCtx

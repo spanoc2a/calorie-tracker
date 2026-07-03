@@ -33,5 +33,14 @@ export async function POST(req) {
   sendPushToUser(athleteId, btTitle, btBody, '/').catch(() => {});
   sendExpoPushToUser(athleteId, btTitle, btBody, { type: 'blood_ready' });
 
+  // Notif in-app de l'élève (même pattern que blood-transfer / report) — fail-silent.
+  try {
+    const notifs = await udb.get('coachNotifications') || [];
+    await udb.set('coachNotifications', [{
+      id: Date.now(), date: new Date().toISOString(),
+      coachName: me.name || 'Ton coach', type: 'bloodResult', read: false,
+    }, ...notifs].slice(0, 20));
+  } catch {}
+
   return Response.json({ ok: true });
 }

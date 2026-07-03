@@ -51,6 +51,27 @@ export async function POST(req) {
   }
 
   const coach = await getUser(coachId);
+
+  // Notifier le coach du rattachement (push web + Expo + notif in-app) — fail-silent.
+  try {
+    const athlete = await getUser(auth.userId);
+    const prenom = (athlete?.name || 'Un élève').trim().split(/\s+/)[0];
+    const title = '🎉 Nouvel élève !';
+    const body = `${prenom} vient de rejoindre ton coaching.`;
+    const { sendPushToUser } = await import('../../push/send/route');
+    const { sendExpoPushToUser } = await import('../../../lib/expoPush');
+    await Promise.all([
+      sendPushToUser(coachId, title, body, '/coach').catch(() => {}),
+      sendExpoPushToUser(coachId, title, body, { type: 'new_athlete', athleteId: auth.userId }),
+    ]);
+    const cdb = userDb(coachId);
+    const notifs = await cdb.get('coachNotifications') || [];
+    await cdb.set('coachNotifications', [{
+      id: Date.now(), date: new Date().toISOString(),
+      type: 'new_athlete', athleteId: auth.userId, athleteName: athlete?.name || null, read: false,
+    }, ...notifs].slice(0, 20));
+  } catch {}
+
   return Response.json({ ok: true, coachName: coach?.name || 'Coach' });
 }
 
